@@ -1,3 +1,101 @@
+// ===== AUTH MODULE =====
+const AUTH={
+  users:{},
+  session:null,
+  selectedRole:'analyst',
+  roleNames:{analyst:'风险分析师',manager:'部门主管',admin:'系统管理员'},
+  hash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h)+s.charCodeAt(i);return String(h)},
+  init(){
+    const stored=localStorage.getItem('orps_users');
+    if(stored){try{this.users=JSON.parse(stored)}catch(e){this.users={}}}
+    if(!this.users['admin']){this.users['admin']={pass:this.hash('admin123'),org:'系统管理部',role:'admin',createdAt:new Date().toISOString()};this.save()}
+    const sess=sessionStorage.getItem('orps_session');
+    if(sess){try{this.session=JSON.parse(sess)}catch(e){this.session=null}}
+    if(this.session&&this.users[this.session.user]){this.enterApp()}
+    else{this.showOverlay()}
+  },
+  save(){localStorage.setItem('orps_users',JSON.stringify(this.users))},
+  showOverlay(){document.getElementById('auth-overlay').style.display='flex';this.showLogin()},
+  hideOverlay(){document.getElementById('auth-overlay').style.display='none'},
+  showLogin(){
+    document.getElementById('auth-card-login').style.display='block';
+    document.getElementById('auth-card-register').style.display='none';
+    this.clearErrors('login');
+  },
+  showRegister(){
+    document.getElementById('auth-card-register').style.display='block';
+    document.getElementById('auth-card-login').style.display='none';
+    this.clearErrors('reg');
+  },
+  selectRole(el,role){
+    document.querySelectorAll('.auth-role').forEach(r=>r.classList.remove('active'));
+    el.classList.add('active');this.selectedRole=role;
+  },
+  showError(id,msg){const e=document.getElementById(id);if(e){e.textContent=msg;e.classList.add('show')}},
+  clearErrors(prefix){document.querySelectorAll('.auth-error').forEach(e=>{if(e.id.startsWith(prefix))e.classList.remove('show')});document.querySelectorAll('.auth-input').forEach(i=>i.classList.remove('error'))},
+  login(){
+    this.clearErrors('login');
+    const u=document.getElementById('login-user').value.trim();
+    const p=document.getElementById('login-pass').value;
+    let ok=true;
+    if(!u){this.showError('login-user-err','请输入用户名');document.getElementById('login-user').classList.add('error');ok=false}
+    if(!p){this.showError('login-pass-err','请输入密码');document.getElementById('login-pass').classList.add('error');ok=false}
+    if(!ok)return;
+    const btn=document.getElementById('login-btn');btn.disabled=true;btn.textContent='登录中...';
+    setTimeout(()=>{
+      const user=this.users[u];
+      if(!user){this.showError('login-user-err','用户名不存在');document.getElementById('login-user').classList.add('error');btn.disabled=false;btn.textContent='🔐 登 录';return}
+      if(user.pass!==this.hash(p)){this.showError('login-pass-err','密码错误');document.getElementById('login-pass').classList.add('error');btn.disabled=false;btn.textContent='🔐 登 录';return}
+      this.session={user:u,role:user.role||'analyst',org:user.org||'',loginTime:new Date().toISOString()};
+      sessionStorage.setItem('orps_session',JSON.stringify(this.session));
+      this.enterApp();btn.disabled=false;btn.textContent='🔐 登 录';
+    },400);
+  },
+  register(){
+    this.clearErrors('reg');
+    const u=document.getElementById('reg-user').value.trim();
+    const org=document.getElementById('reg-org').value.trim();
+    const p=document.getElementById('reg-pass').value;
+    const p2=document.getElementById('reg-pass2').value;
+    let ok=true;
+    if(!u||u.length<3){this.showError('reg-user-err','用户名至少3个字符');document.getElementById('reg-user').classList.add('error');ok=false}
+    else if(!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(u)){this.showError('reg-user-err','只能包含字母、数字、下划线、中文');document.getElementById('reg-user').classList.add('error');ok=false}
+    else if(this.users[u]){this.showError('reg-user-err','该用户名已被注册');document.getElementById('reg-user').classList.add('error');ok=false}
+    if(!p||p.length<6){this.showError('reg-pass-err','密码至少6位');document.getElementById('reg-pass').classList.add('error');ok=false}
+    if(p!==p2){this.showError('reg-pass2-err','两次密码不一致');document.getElementById('reg-pass2').classList.add('error');ok=false}
+    if(!ok)return;
+    const btn=document.getElementById('reg-btn');btn.disabled=true;btn.textContent='注册中...';
+    setTimeout(()=>{
+      this.users[u]={pass:this.hash(p),org:org||'未填写',role:this.selectedRole,createdAt:new Date().toISOString()};
+      this.save();
+      this.session={user:u,role:this.selectedRole,org:org,loginTime:new Date().toISOString()};
+      sessionStorage.setItem('orps_session',JSON.stringify(this.session));
+      this.enterApp();btn.disabled=false;btn.textContent='✅ 注 册';
+    },400);
+  },
+  enterApp(){
+    this.hideOverlay();
+    const s=this.session;
+    const ic=document.getElementById('tb-user-ic');
+    const name=document.getElementById('tb-user-name');
+    if(ic)ic.textContent=s.user.charAt(0).toUpperCase();
+    if(name)name.textContent=s.user;
+    if(!window._appInited){window._appInited=true;renderTicker();initDashboard();initAssess();}
+  },
+  logout(){
+    if(!confirm('确定要退出登录吗？'))return;
+    sessionStorage.removeItem('orps_session');
+    this.session=null;
+    window._appInited=false;
+    document.getElementById('login-user').value='';
+    document.getElementById('login-pass').value='';
+    this.showOverlay();
+  }
+};
+// Enter key support
+document.addEventListener('keydown',e=>{if(e.key==='Enter'){const ov=document.getElementById('auth-overlay');if(ov&&ov.style.display!=='none'){if(document.getElementById('auth-card-login').style.display!=='none')AUTH.login();else if(document.getElementById('auth-card-register').style.display!=='none')AUTH.register();}}});
+// ===== END AUTH MODULE =====
+
 const DIMS=[{key:'political',name:'政治风险',ic:'🏛',w:.15,color:'#2563eb',factors:['政局稳定性','政策连续性','政府治理效率','国际关系态势']},{key:'economic',name:'经济风险',ic:'📉',w:.15,color:'#0891b2',factors:['GDP增长趋势','通胀与汇率','主权债务风险','贸易管制程度']},{key:'security',name:'安全风险',ic:'🛡',w:.20,color:'#dc2626',factors:['恐怖主义威胁','社会治安状况','军事冲突风险','网络安全威胁']},{key:'legal',name:'法律风险',ic:'⚖',w:.10,color:'#7c3aed',factors:['法律体系完善度','司法独立性','知识产权保护','外资准入限制']},{key:'social',name:'社会文化风险',ic:'👥',w:.10,color:'#ea580c',factors:['文化差异程度','宗教冲突风险','排外情绪指数','舆论环境']},{key:'natural',name:'自然环境风险',ic:'🌪',w:.10,color:'#059669',factors:['自然灾害频率','气候变化影响','公共卫生状况','资源环境约束']},{key:'operational',name:'运营风险',ic:'⚙',w:.10,color:'#d97706',factors:['基础设施水平','供应链稳定性','人力资源可用性','技术依赖度']},{key:'geopolitical',name:'地缘战略风险',ic:'🗺',w:.10,color:'#be185d',factors:['大国博弈影响','区域冲突外溢','制裁与封锁风险','地缘通道重要性']}];
 const COUNTRIES=[
 {name:'阿富汗',flag:'🇦🇫',region:'南亚',capital:'喀布尔',pop:'3890万',gdp:'147.9亿$',gdpGrowth:'-2.4%',inflation:'8.2%',currency:'阿富汗尼',credit:'CCC',diplo:'代办级',trade:'5.8亿$',lon:67,lat:33,scores:{political:9.5,economic:9,security:9.8,legal:8.5,social:8,natural:7,operational:9,geopolitical:9.5},trend:'up',mainRisk:'安全风险',lastUpdate:'2026-07-13 08:30',notes:'塔利班执政后局势持续动荡，恐怖袭击频发。2021年8月喀布尔陷落后，中色集团艾娜克铜矿项目暂停。2026年7月喀布尔发生连环爆炸袭击，中方人员安全受直接威胁。'},
@@ -468,4 +566,4 @@ function initStats(){
 function closeModal(){document.getElementById('modal').classList.remove('show')}
 function exportData(){const data={date:new Date().toISOString(),enterprises:ENTERPRISES,countries:COUNTRIES,alerts:ALERTS,events:EVENTS,warningRules:WARNING_RULES};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`海外利益保护数据_${new Date().toISOString().split('T')[0]}.json`;a.click();URL.revokeObjectURL(url);showToast('✅ 数据已导出');}
 //初始化
-document.addEventListener('DOMContentLoaded',()=>{renderTicker();initDashboard();initAssess();});
+document.addEventListener('DOMContentLoaded',()=>{AUTH.init()});

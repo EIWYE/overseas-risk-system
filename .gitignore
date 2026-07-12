@@ -1,0 +1,22 @@
+# Build artifacts
+node_modules/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Old version
+海外利益保护风险评估系统.html
+
+# WorkBuddy
+.workbuddy/

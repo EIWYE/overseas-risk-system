@@ -294,8 +294,8 @@ function showToast(m){const t=document.getElementById('toast');t.textContent=m;t
 function genAlertTrend(){const days=[];const today=new Date('2025-06-01');const seedData=[[2,4,2,1],[1,3,3,1],[2,2,1,0],[3,4,2,1],[1,3,2,0],[2,5,3,1],[0,2,1,1],[1,3,2,0],[2,4,2,1],[3,3,1,1],[1,2,3,0],[2,4,2,1],[0,3,1,0],[1,5,2,1],[2,3,3,1],[3,4,1,0],[1,2,2,1],[2,5,3,1],[1,3,2,0],[0,2,1,1],[2,4,2,1],[1,3,3,0],[3,5,2,1],[1,2,1,0],[2,4,3,1],[0,3,2,1],[1,5,2,0],[2,3,3,1],[1,4,2,0],[2,5,3,1]];for(let i=29;i>=0;i--){const d=new Date(today);d.setDate(d.getDate()-i);days.push({d:String(d.getMonth()+1)+'/'+String(d.getDate()),r:seedData[29-i][0],o:seedData[29-i][1],y:seedData[29-i][2],b:seedData[29-i][3]})}return days}
 let charts={};
 //导航
-const VIEW_MAP={dashboard:{t:'态势总览',b:'监测中心 / 态势总览'},map:{t:'风险地图',b:'监测中心 / 风险地图'},enterprises:{t:'中资企业',b:'监测中心 / 中资企业'},countries:{t:'国家监测',b:'监测中心 / 国家监测'},alerts:{t:'预警中心',b:'监测中心 / 预警中心'},events:{t:'事件追踪',b:'监测中心 / 事件追踪'},personnel:{t:'人员安全',b:'监测中心 / 人员安全'},prediction:{t:'预测中心',b:'分析工具 / 预测中心'},assess:{t:'风险评估',b:'分析工具 / 风险评估'},matrix:{t:'风险矩阵',b:'分析工具 / 风险矩阵'},stats:{t:'统计分析',b:'分析工具 / 统计分析'},reports:{t:'报告中心',b:'管理 / 报告中心'},settings:{t:'系统管理',b:'管理 / 系统管理'}};
-function navigateTo(v){document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active');document.querySelectorAll('.sb-item').forEach(x=>x.classList.remove('active'));const si=document.querySelector('.sb-item[data-view="'+v+'"]');if(si)si.classList.add('active');const i=VIEW_MAP[v]||{t:v,b:v};document.getElementById('pageTitle').textContent=i.t;document.getElementById('pageCrumb').textContent=i.b;const r=document.getElementById('content');if(r)r.scrollTop=0;if(v==='dashboard')initDashboard();if(v==='map')renderRiskMap();if(v==='enterprises')renderEntGrid();if(v==='countries')renderCtyGrid();if(v==='alerts'){renderAlertSummary();renderAlertList();renderAlertCenterCharts();renderWarningRules();}if(v==='events')renderEvents();if(v==='personnel')renderPersonnel();if(v==='prediction')renderPrediction();if(v==='matrix')renderMatrix();if(v==='stats')initStats();}
+const VIEW_MAP={dashboard:{t:'态势总览',b:'监测中心 / 态势总览'},map:{t:'风险地图',b:'监测中心 / 风险地图'},enterprises:{t:'中资企业',b:'监测中心 / 中资企业'},countries:{t:'国家监测',b:'监测中心 / 国家监测'},alerts:{t:'预警中心',b:'监测中心 / 预警中心'},events:{t:'事件追踪',b:'监测中心 / 事件追踪'},personnel:{t:'人员安全',b:'监测中心 / 人员安全'},collect:{t:'数据采集',b:'分析工具 / 数据采集'},prediction:{t:'预测中心',b:'分析工具 / 预测中心'},assess:{t:'风险评估',b:'分析工具 / 风险评估'},matrix:{t:'风险矩阵',b:'分析工具 / 风险矩阵'},stats:{t:'统计分析',b:'分析工具 / 统计分析'},reports:{t:'报告中心',b:'管理 / 报告中心'},settings:{t:'系统管理',b:'管理 / 系统管理'}};
+function navigateTo(v){document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active');document.querySelectorAll('.sb-item').forEach(x=>x.classList.remove('active'));const si=document.querySelector('.sb-item[data-view="'+v+'"]');if(si)si.classList.add('active');const i=VIEW_MAP[v]||{t:v,b:v};document.getElementById('pageTitle').textContent=i.t;document.getElementById('pageCrumb').textContent=i.b;const r=document.getElementById('content');if(r)r.scrollTop=0;if(v==='dashboard')initDashboard();if(v==='map')renderRiskMap();if(v==='enterprises')renderEntGrid();if(v==='countries')renderCtyGrid();if(v==='alerts'){renderAlertSummary();renderAlertList();renderAlertCenterCharts();renderWarningRules();}if(v==='events')renderEvents();if(v==='personnel')renderPersonnel();if(v==='collect')COLLECT.init();if(v==='prediction')renderPrediction();if(v==='matrix')renderMatrix();if(v==='stats')initStats();}
 document.querySelectorAll('.sb-item').forEach(item=>item.addEventListener('click',()=>navigateTo(item.dataset.view)));
 //时钟
 function updateClock(){const n=new Date();const d=['日','一','二','三','四','五','六'][n.getDay()];document.getElementById('tb-time').textContent=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')} 周${d}`}
@@ -565,5 +565,412 @@ function initStats(){
 //通用
 function closeModal(){document.getElementById('modal').classList.remove('show')}
 function exportData(){const data={date:new Date().toISOString(),enterprises:ENTERPRISES,countries:COUNTRIES,alerts:ALERTS,events:EVENTS,warningRules:WARNING_RULES};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`海外利益保护数据_${new Date().toISOString().split('T')[0]}.json`;a.click();URL.revokeObjectURL(url);showToast('✅ 数据已导出');}
+// ===== DATA COLLECTION MODULE =====
+const COLLECT={
+  sources:[
+    {id:'gdelt',name:'GDELT全球新闻事件',ic:'📰',desc:'从GDELT Project API采集与中国海外利益相关的全球新闻',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v2/doc/doc'},
+    {id:'worldbank',name:'世界银行经济指标',ic:'📊',desc:'采集监测国家的GDP、通胀、汇率等宏观经济数据',enabled:true,type:'econ',api:'https://api.worldbank.org/v2'},
+    {id:'fxrate',name:'实时汇率数据',ic:'💰',desc:'采集美元兑人民币等关键货币实时汇率',enabled:true,type:'fx',api:'https://open.er-api.com/v6/latest/USD'},
+    {id:'rss',name:'RSS新闻聚合',ic:'📡',desc:'通过RSS2JSON采集Reuters/BBC/联合国等国际媒体新闻',enabled:true,type:'news',api:'https://api.rss2json.com/v1/api.json'},
+    {id:'restcountry',name:'国家基础信息',ic:'🌐',desc:'从Rest Countries API采集国家人口/面积/首都等信息',enabled:true,type:'country',api:'https://restcountries.com/v3.1'}
+  ],
+  data:{news:[],econ:[],fx:[],country:[]},
+  stats:{success:0,fail:0,records:0,lastTime:null},
+  autoTimer:null,
+  autoInterval:600000,
+  inited:false,
+  currentTab:'news',
+  gdeltQueries:[
+    {q:'China overseas investment',label:'中国海外投资'},
+    {q:'Chinese companies security risk',label:'中企安全风险'},
+    {q:'China Belt Road',label:'一带一路'},
+    {q:'China Sudan OR Pakistan OR Myanmar',label:'高风险国家'},
+    {q:'Chinese workers attack',label:'中方人员遇袭'}
+  ],
+  rssFeeds:[
+    {url:'https://feeds.reuters.com/reuters/worldNews',name:'Reuters World News'},
+    {url:'https://feeds.bbci.co.uk/news/world/rss.xml',name:'BBC World News'},
+    {url:'https://news.un.org/feed/subscribe/en/news/all/rss.xml',name:'UN News'}
+  ],
+  wbIndicators:[
+    {code:'NY.GDP.MKTP.CD',name:'GDP（美元）'},
+    {code:'NY.GDP.MKTP.KD.ZG',name:'GDP增长率（%）'},
+    {code:'FP.CPI.TOTL.ZG',name:'通货膨胀率（%）'},
+    {code:'NE.EXP.GNFS.CD',name:'出口总额（美元）'},
+    {code:'BX.KLT.DINV.CD.WD',name:'外商直接投资（美元）'},
+    {code:'PA.NUS.FCRF',name:'官方汇率（本币/美元）'}
+  ],
+  countryCodes:{'中国':'CHN','阿富汗':'AFG','巴基斯坦':'PAK','哈萨克斯坦':'KAZ','俄罗斯':'RUS','苏丹':'SDN','缅甸':'MMR','伊拉克':'IRQ','委内瑞拉':'VEN','伊朗':'IRN','尼日利亚':'NGA','沙特阿拉伯':'SAU','南非':'ZAF','埃塞俄比亚':'ETH','越南':'VNM','印度尼西亚':'IDN','巴西':'BRA','美国':'USA','泰国':'THA','阿联酋':'ARE','澳大利亚':'AUS','新加坡':'SGP','土耳其':'TUR','埃及':'EGY','利比亚':'LBY','也门':'YEM','索马里':'SOM','南苏丹':'SSD','刚果(金)':'COD','哥伦比亚':'COL','墨西哥':'MEX','秘鲁':'PER','印度':'IND','菲律宾':'PHL','马来西亚':'MYS','柬埔寨':'KHM','乌兹别克斯坦':'UZB','肯尼亚':'KEN','安哥拉':'AGO','阿尔及利亚':'DZA','塞尔维亚':'SRB','乌克兰':'UKR','叙利亚':'SYR'},
+  init(){
+    if(this.inited)return;
+    this.inited=true;
+    this.renderSources();
+    this.log('info','[系统] 数据采集中心初始化完成，共'+this.sources.length+'个数据源就绪');
+    this.updateStats();
+  },
+  renderSources(){
+    const el=document.getElementById('collect-sources');
+    if(!el)return;
+    el.innerHTML=this.sources.map(s=>`<div class="src-card${s.enabled?' enabled':''}" onclick="COLLECT.toggleSource('${s.id}')"><div class="src-card-toggle${s.enabled?' on':''}" id="toggle-${s.id}"></div><div class="src-card-hd"><div class="src-card-ic">${s.ic}</div><div class="src-card-tt">${s.name}</div></div><div class="src-card-desc">${s.desc}</div><div class="src-card-meta"><span>类型：${s.type}</span><span>状态：<span style="color:${s.enabled?'var(--green)':'var(--text2)'}">${s.enabled?'已启用':'未启用'}</span></span></div></div>`).join('');
+    const enabledCount=this.sources.filter(s=>s.enabled).length;
+    document.getElementById('cs-sources').textContent=enabledCount;
+  },
+  toggleSource(id){
+    const s=this.sources.find(x=>x.id===id);
+    if(!s)return;
+    s.enabled=!s.enabled;
+    const card=event.currentTarget;
+    card.classList.toggle('enabled');
+    const toggle=document.getElementById('toggle-'+id);
+    if(toggle)toggle.classList.toggle('on');
+    const meta=card.querySelector('.src-card-meta span:last-child span');
+    if(meta){meta.textContent=s.enabled?'已启用':'未启用';meta.style.color=s.enabled?'var(--green)':'var(--text2)'}
+    document.getElementById('cs-sources').textContent=this.sources.filter(x=>x.enabled).length;
+    this.log('info','['+s.name+'] '+(s.enabled?'已启用':'已停用'));
+  },
+  async collectAll(){
+    const btn=document.getElementById('btn-collect-all');
+    const enabledSources=this.sources.filter(s=>s.enabled);
+    if(!enabledSources.length){showToast('请至少启用一个数据源');return}
+    if(btn){btn.disabled=true;btn.innerHTML='<span class="collect-spin"></span> 采集中...'}
+    const prog=document.getElementById('collect-progress');
+    const progBar=document.getElementById('collect-progress-bar');
+    if(prog){prog.classList.add('show')}
+    this.log('info','[系统] ===== 开始采集，共'+enabledSources.length+'个数据源 =====');
+    let done=0;
+    for(const s of enabledSources){
+      if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
+      try{
+        this.log('info','['+s.name+'] 开始采集...');
+        switch(s.id){
+          case 'gdelt':await this.collectGDELT();break;
+          case 'worldbank':await this.collectWorldBank();break;
+          case 'fxrate':await this.collectFxRate();break;
+          case 'rss':await this.collectRSS();break;
+          case 'restcountry':await this.collectRestCountries();break;
+        }
+        this.stats.success++;
+        done++;
+        if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
+      }catch(e){
+        this.stats.fail++;
+        done++;
+        this.log('error','['+s.name+'] 采集失败：'+e.message);
+        if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
+      }
+    }
+    this.stats.lastTime=new Date();
+    this.updateStats();
+    this.renderResults();
+    if(progBar)progBar.style.width='100%';
+    setTimeout(()=>{if(prog)prog.classList.remove('show')},2000);
+    if(btn){btn.disabled=false;btn.innerHTML='🚀 一键采集全部'}
+    const total=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+    this.log('success','[系统] ===== 采集完成！成功'+this.stats.success+'个源，失败'+this.stats.fail+'个，共采集'+total+'条记录 =====');
+    showToast('✅ 数据采集完成，共获取'+total+'条记录');
+    const badge=document.getElementById('sb-collect-count');
+    if(badge)badge.textContent=total;
+  },
+  async collectGDELT(){
+    const results=[];
+    for(const query of this.gdeltQueries){
+      try{
+        const url=this.sources.find(s=>s.id==='gdelt').api+'?query='+encodeURIComponent(query.q)+'&mode=ArtList&format=json&maxrecords=10&sort=DateDesc&timespan=1month';
+        this.log('info','[GDELT] 请求关键词："'+query.label+'"');
+        const resp=await fetch(url);
+        if(!resp.ok)throw new Error('HTTP '+resp.status);
+        const data=await resp.json();
+        if(data.articles&&data.articles.length){
+          data.articles.forEach(a=>{
+            results.push({
+              title:a.title||'(无标题)',
+              url:a.url||'',
+              source:a.domain||'GDELT',
+              date:a.seendate||'',
+              language:a.language||'',
+              socialimage:a.socialimage||'',
+              query:query.label,
+              type:'gdelt'
+            });
+          });
+          this.log('success','[GDELT] "'+query.label+'" 采集到'+data.articles.length+'条新闻');
+        }else{
+          this.log('warn','[GDELT] "'+query.label+'" 无结果');
+        }
+      }catch(e){
+        this.log('error','[GDELT] 关键词"'+query.label+'"请求失败：'+e.message);
+      }
+    }
+    const existing=this.data.news.filter(n=>n.type!=='gdelt');
+    this.data.news=[...results,...existing];
+    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+  },
+  async collectWorldBank(){
+    const results=[];
+    const countries=COUNTRIES.slice(0,20);
+    let collected=0;
+    for(const countryCode of Object.values(this.countryCodes).slice(0,20)){
+      const cname=Object.keys(this.countryCodes).find(k=>this.countryCodes[k]===countryCode);
+      for(const ind of this.wbIndicators){
+        try{
+          const url=this.sources.find(s=>s.id==='worldbank').api+'/country/'+countryCode+'/indicator/'+ind.code+'?format=json&per_page=1&date=2020:2024';
+          const resp=await fetch(url);
+          if(!resp.ok)continue;
+          const data=await resp.json();
+          if(data&&data[1]&&data[1][0]){
+            const item=data[1][0];
+            results.push({
+              country:cname,
+              indicator:ind.name,
+              value:item.value,
+              year:item.date,
+              source:'World Bank API',
+              collectTime:new Date().toLocaleString('zh-CN')
+            });
+            collected++;
+          }
+        }catch(e){}
+      }
+      if(collected%6===0)this.log('info','[World Bank] 已采集'+collected+'条指标数据...');
+    }
+    this.data.econ=results;
+    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+    this.log('success','[World Bank] 采集完成，共'+results.length+'条经济指标数据');
+  },
+  async collectFxRate(){
+    try{
+      const url=this.sources.find(s=>s.id==='fxrate').api;
+      this.log('info','[汇率] 请求实时汇率数据...');
+      const resp=await fetch(url);
+      if(!resp.ok)throw new Error('HTTP '+resp.status);
+      const data=await resp.json();
+      if(data&&data.rates){
+        const keyCurrencies=['CNY','EUR','GBP','JPY','RUB','INR','BRL','ZAR','KRW','TRY','AED','SGD','AUD','CAD','PKR','EGP','NGN','VND','IDR','THR'];
+        this.data.fx=keyCurrencies.filter(c=>data.rates[c]).map(c=>({
+          pair:'USD/'+c,
+          rate:data.rates[c],
+          base:'USD',
+          quote:c,
+          updateTime:data.time_last_update_utc||new Date().toUTCString(),
+          source:'open.er-api.com',
+          collectTime:new Date().toLocaleString('zh-CN')
+        }));
+        this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+        this.log('success','[汇率] 采集完成，共'+this.data.fx.length+'个货币汇率（基准：USD）');
+      }
+    }catch(e){
+      this.log('error','[汇率] 采集失败：'+e.message);
+      throw e;
+    }
+  },
+  async collectRSS(){
+    let allItems=[];
+    for(const feed of this.rssFeeds){
+      try{
+        const url=this.sources.find(s=>s.id==='rss').api+'?rss_url='+encodeURIComponent(feed.url)+'&count=8';
+        this.log('info','[RSS] 请求：'+feed.name);
+        const resp=await fetch(url);
+        if(!resp.ok)throw new Error('HTTP '+resp.status);
+        const data=await resp.json();
+        if(data&&data.items&&data.items.length){
+          data.items.forEach(item=>{
+            allItems.push({
+              title:item.title||'(无标题)',
+              url:item.link||'',
+              source:feed.name,
+              date:item.pubDate||'',
+              description:(item.description||'').replace(/<[^>]*>/g,'').substring(0,200),
+              query:'RSS订阅',
+              type:'rss'
+            });
+          });
+          this.log('success','[RSS] '+feed.name+' 采集到'+data.items.length+'条新闻');
+        }else{
+          this.log('warn','[RSS] '+feed.name+' 无结果或状态：'+(data.status||'unknown'));
+        }
+      }catch(e){
+        this.log('error','[RSS] '+feed.name+' 请求失败：'+e.message);
+      }
+    }
+    const existing=this.data.news.filter(n=>n.type==='gdelt');
+    this.data.news=[...existing,...allItems];
+    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+    this.log('success','[RSS] RSS聚合采集完成，共'+allItems.length+'条新闻');
+  },
+  async collectRestCountries(){
+    const results=[];
+    const countryNames=Object.keys(this.countryCodes);
+    for(let i=0;i<countryNames.length;i+=5){
+      const batch=countryNames.slice(i,i+5);
+      for(const cname of batch){
+        try{
+          const searchName=cname.replace(/\(.*\)/,'').trim();
+          const url=this.sources.find(s=>s.id==='restcountry').api+'/name/'+encodeURIComponent(searchName)+'?fields=name,capital,population,area,region,subregion,currencies,languages,flag';
+          const resp=await fetch(url);
+          if(!resp.ok)continue;
+          const data=await resp.json();
+          if(Array.isArray(data)&&data[0]){
+            const c=data[0];
+            const cur=c.currencies?Object.values(c.currencies).map(x=>x.name).join(', '):'—';
+            const lang=c.languages?Object.values(c.languages).join(', '):'—';
+            results.push({
+              country:cname,
+              capital:Array.isArray(c.capital)?c.capital[0]:(c.capital||'—'),
+              population:c.population?c.population.toLocaleString():'—',
+              area:c.area?c.area.toLocaleString():'—',
+              region:c.region||'—',
+              currency:cur,
+              language:lang,
+              collectTime:new Date().toLocaleString('zh-CN')
+            });
+          }
+        }catch(e){}
+      }
+      if(i>0)this.log('info','[Rest Countries] 已采集'+results.length+'个国家信息...');
+    }
+    this.data.country=results;
+    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+    this.log('success','[Rest Countries] 采集完成，共'+results.length+'个国家基础信息');
+  },
+  renderResults(){
+    this.renderNews();
+    this.renderEcon();
+    this.renderFx();
+    this.renderCountry();
+  },
+  renderNews(){
+    const el=document.getElementById('collect-news-list');
+    const cnt=document.getElementById('news-count');
+    if(!el)return;
+    if(!this.data.news.length){
+      el.innerHTML='<div class="empty"><div class="ic">📰</div><div>暂无采集数据</div></div>';
+      if(cnt)cnt.textContent='0条记录';
+      return;
+    }
+    if(cnt)cnt.textContent=this.data.news.length+'条记录';
+    const riskKeywords=['attack','kill','bomb','security','conflict','war','sanction','crisis','evacuat','threat','kidnap','explosion','coup','unrest','protest','terror'];
+    el.innerHTML=this.data.news.map(n=>{
+      const lowerTitle=(n.title||'').toLowerCase();
+      const isRisk=riskKeywords.some(k=>lowerTitle.includes(k));
+      const cls=isRisk?'red':(n.type==='rss'?'':'yellow');
+      const dateStr=n.date?n.date.substring(0,16):'';
+      const srcTag=n.type==='gdelt'?'GDELT':'RSS';
+      return `<div class="collect-news-item ${cls}"><div class="collect-news-tt">${isRisk?'⚠️ ':''}${n.url?'<a href="'+n.url+'" target="_blank">'+this.escapeHtml(n.title)+'</a>':this.escapeHtml(n.title)}</div><div class="collect-news-meta"><span class="collect-news-src">${srcTag}</span><span>📰 ${this.escapeHtml(n.source||'')}</span>${dateStr?'<span>🕐 '+dateStr+'</span>':''}<span>🔍 ${this.escapeHtml(n.query||'')}</span></div>${n.description?'<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.4">'+this.escapeHtml(n.description)+'</div>':''}</div>`;
+    }).join('');
+  },
+  renderEcon(){
+    const el=document.getElementById('collect-econ-body');
+    const cnt=document.getElementById('econ-count');
+    if(!el)return;
+    if(!this.data.econ.length){
+      el.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';
+      if(cnt)cnt.textContent='0条记录';
+      return;
+    }
+    if(cnt)cnt.textContent=this.data.econ.length+'条记录';
+    el.innerHTML=this.data.econ.map(e=>{
+      let val=e.value;
+      if(e.indicator.includes('%'))val=val+'%';
+      else if(val&&Math.abs(val)>1e9)val=(val/1e9).toFixed(2)+'B$';
+      else if(val&&Math.abs(val)>1e6)val=(val/1e6).toFixed(2)+'M$';
+      else val=val!==null&&val!==undefined?Number(val).toFixed(2):'—';
+      return `<tr><td><strong>${this.escapeHtml(e.country)}</strong></td><td>${this.escapeHtml(e.indicator)}</td><td><strong>${val}</strong></td><td>${e.year||'—'}</td><td><span class="collect-news-src">${this.escapeHtml(e.source)}</span></td><td style="font-size:10px;color:var(--text2)">${e.collectTime||''}</td></tr>`;
+    }).join('');
+  },
+  renderFx(){
+    const el=document.getElementById('collect-fx-grid');
+    const cnt=document.getElementById('fx-count');
+    if(!el)return;
+    if(!this.data.fx.length){
+      el.innerHTML='<div class="empty"><div class="ic">💰</div><div>暂无采集数据</div></div>';
+      if(cnt)cnt.textContent='0条记录';
+      return;
+    }
+    if(cnt)cnt.textContent=this.data.fx.length+'条记录';
+    el.innerHTML=this.data.fx.map(f=>{
+      const isCNY=f.quote==='CNY';
+      return `<div class="collect-fx-card" style="${isCNY?'border-color:var(--accent);background:var(--blue-bg)':''}"><div class="collect-fx-pair">${f.pair}</div><div class="collect-fx-rate" style="${isCNY?'color:var(--accent)':''}">${f.rate.toFixed(4)}</div><div class="collect-fx-change" style="color:var(--text2)">${f.source}</div>${isCNY?'<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">🇨🇳 关注货币</div>':''}</div>`;
+    }).join('');
+  },
+  renderCountry(){
+    const el=document.getElementById('collect-country-body');
+    const cnt=document.getElementById('country-count');
+    if(!el)return;
+    if(!this.data.country.length){
+      el.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';
+      if(cnt)cnt.textContent='0条记录';
+      return;
+    }
+    if(cnt)cnt.textContent=this.data.country.length+'条记录';
+    el.innerHTML=this.data.country.map(c=>`<tr><td><strong>${this.escapeHtml(c.country)}</strong></td><td>${this.escapeHtml(c.capital)}</td><td>${c.population}</td><td>${c.area}</td><td>${this.escapeHtml(c.region)}</td><td>${this.escapeHtml(c.currency)}</td><td style="font-size:11px">${this.escapeHtml(c.language)}</td><td style="font-size:10px;color:var(--text2)">${c.collectTime||''}</td></tr>`).join('');
+  },
+  switchTab(tab,el){
+    document.querySelectorAll('.collect-tab').forEach(t=>t.classList.remove('active'));
+    if(el)el.classList.add('active');
+    document.querySelectorAll('.collect-results').forEach(r=>r.classList.remove('active'));
+    const target=document.getElementById('collect-results-'+tab);
+    if(target)target.classList.add('active');
+    this.currentTab=tab;
+  },
+  updateStats(){
+    document.getElementById('cs-success').textContent=this.stats.success;
+    document.getElementById('cs-fail').textContent=this.stats.fail;
+    document.getElementById('cs-records').textContent=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
+    document.getElementById('cs-last').textContent=this.stats.lastTime?this.stats.lastTime.toLocaleString('zh-CN'):'未采集';
+  },
+  log(type,msg){
+    const el=document.getElementById('collect-log');
+    if(!el)return;
+    const time=new Date().toLocaleTimeString('zh-CN');
+    const line=document.createElement('div');
+    line.className='collect-log-line '+type;
+    line.textContent='['+time+'] '+msg;
+    el.appendChild(line);
+    el.scrollTop=el.scrollHeight;
+    while(el.children.length>200)el.removeChild(el.firstChild);
+  },
+  clearLog(){
+    const el=document.getElementById('collect-log');
+    if(el)el.innerHTML='<div class="collect-log-line info">[系统] 日志已清空</div>';
+  },
+  toggleAuto(){
+    if(this.autoTimer){
+      clearInterval(this.autoTimer);
+      this.autoTimer=null;
+      document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';
+      this.log('info','[系统] 自动采集已关闭');
+      showToast('自动采集已关闭');
+    }else{
+      this.autoInterval=parseInt(document.getElementById('auto-interval').value);
+      if(this.autoInterval===0){
+        showToast('请选择采集间隔');
+        return;
+      }
+      this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);
+      document.getElementById('auto-toggle-text').textContent='⏱️ 关闭自动采集';
+      this.log('success','[系统] 自动采集已开启，间隔'+(this.autoInterval/60000)+'分钟');
+      showToast('✅ 自动采集已开启');
+    }
+  },
+  updateInterval(){
+    const val=parseInt(document.getElementById('auto-interval').value);
+    if(val===0&&this.autoTimer){
+      clearInterval(this.autoTimer);
+      this.autoTimer=null;
+      document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';
+      this.log('info','[系统] 自动采集已关闭');
+    }else if(this.autoTimer){
+      clearInterval(this.autoTimer);
+      this.autoInterval=val;
+      this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);
+      this.log('info','[系统] 采集间隔已更新为'+(this.autoInterval/60000)+'分钟');
+    }
+  },
+  escapeHtml(s){
+    if(!s)return'';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  }
+};
+// ===== END DATA COLLECTION MODULE =====
 //初始化
 document.addEventListener('DOMContentLoaded',()=>{AUTH.init()});

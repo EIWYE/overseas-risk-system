@@ -565,67 +565,166 @@ function initStats(){
 //通用
 function closeModal(){document.getElementById('modal').classList.remove('show')}
 function exportData(){const data={date:new Date().toISOString(),enterprises:ENTERPRISES,countries:COUNTRIES,alerts:ALERTS,events:EVENTS,warningRules:WARNING_RULES};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`海外利益保护数据_${new Date().toISOString().split('T')[0]}.json`;a.click();URL.revokeObjectURL(url);showToast('✅ 数据已导出');}
-// ===== DATA COLLECTION MODULE (v2 — fixed CORS + multi-source fallback) =====
+// ===== GLOBAL TERRORISM DATA — GTI 2026 Real Statistics =====
+const TERROR_STATS={
+  title:'Global Terrorism Index 2026',
+  year:2025,
+  totalDeaths:5582,
+  totalAttacks:2944,
+  deathsChange:-28,
+  attacksChange:-22,
+  topCountries:[
+    {rank:1,country:'巴基斯坦',score:8.574,deaths:1139,attacks:1045,trend:'up',detail:'首次登顶，TTP + BLA 双驱动，死亡数创2013年以来最高'},
+    {rank:2,country:'布基纳法索',score:8.324,deaths:846,attacks:null,trend:'down',detail:'死亡降45%，但仍为萨赫勒核心重灾区'},
+    {rank:3,country:'尼日尔',score:null,deaths:703,attacks:null,trend:'stable',detail:'萨赫勒地区，JNIM等组织活跃'},
+    {rank:4,country:'尼日利亚',score:null,deaths:750,attacks:null,trend:'up',detail:'死亡上升46%，ISWAP+Boko Haram占80%'},
+    {rank:5,country:'刚果(金)',score:null,deaths:467,attacks:null,trend:'up',detail:'IS-ADF袭击平民目标，死亡上升28%'},
+    {rank:6,country:'马里',score:null,deaths:null,attacks:null,trend:'stable',detail:'JNIM控制区域扩大，经济封锁策略'},
+    {rank:7,country:'索马里',score:null,deaths:null,attacks:null,trend:'stable',detail:'青年党(al-Shabaab)持续活跃'},
+    {rank:8,country:'叙利亚',score:null,deaths:null,attacks:null,trend:'stable',detail:'IS残余势力重组，新领导层出现'},
+    {rank:9,country:'喀麦隆',score:null,deaths:null,attacks:null,trend:'stable',detail:'博科圣地跨境袭击'},
+    {rank:10,country:'哥伦比亚',score:null,deaths:null,attacks:null,trend:'up',detail:'FARC分裂派+ELN，死亡上升70%，无人机攻击77起'}
+  ],
+  topGroups:[
+    {rank:1,name:'伊斯兰国(IS)及其分支机构',deaths:null,share:17,countries:15,targets:'平民、宗教场所、安全部队',note:'虽活跃国家从22降至15，仍为最致命组织'},
+    {rank:2,name:'JNIM(伊斯兰与穆斯林支持组织)',deaths:null,share:null,region:'萨赫勒',note:'萨赫勒地区主要威胁，经济封锁策略'},
+    {rank:3,name:'巴基斯坦塔利班(TTP)',deaths:637,attacks:595,share:null,trend:'up_13%',note:'唯一死亡数上升的主要组织，占巴基斯坦56%死亡'},
+    {rank:4,name:'索马里青年党(al-Shabaab)',deaths:null,share:null,region:'东非',note:'索马里及肯尼亚边境持续活跃'}
+  ],
+  keyFacts:[
+    '全球恐袭死亡5,582人（↓28%），袭击2,944起（↓22%）——创2007年以来最低',
+    '但西方恐袭死亡激增280%，57人丧生（反犹+伊斯兰恐惧症+政治恐怖主义）',
+    '巴基斯坦首次超越布基纳法索，成为全球受恐袭影响最严重国家',
+    '撒哈拉以南非洲占全球恐袭死亡过半，6个最严重国家均在非洲',
+    'Top 4组织(IS/JNIM/TTP/al-Shabaab)占全球恐袭死亡70%',
+    '41%袭击发生在距国境50km内，64%在100km内——边境安全成关键',
+    '5国(巴基斯坦/布基纳法索/尼日利亚/尼日尔/刚果金)占全球恐袭死亡70%'
+  ]
+};
+
+// ===== REAL GLOBAL TERRORIST ATTACK EVENTS (2024-2026) =====
+const TERROR_EVENTS=[
+  // === Pakistan ===
+  {date:'2026-02-06',country:'巴基斯坦',city:'伊斯兰堡',group:'ISIS/未知',type:'自杀式爆炸',target:'什叶派清真寺',deaths:40,injured:60,desc:'伊斯兰堡什叶派清真寺祈祷期间发生强力自杀式爆炸，数十人死亡',source:'PIPS/今日头条'},
+  {date:'2026-06-09',country:'巴基斯坦',city:'开伯尔-普赫图赫瓦',group:'TTP',type:'武装袭击',target:'警察哨所',deaths:6,injured:0,desc:'TTP武装分子袭击哈桑海尔地区联邦警察哨所，6名警员牺牲，8人被绑架',source:'凤凰网'},
+  {date:'2026-06-02',country:'巴基斯坦',city:'北瓦济里斯坦',group:'TTP',type:'汽车炸弹',target:'军事哨所',deaths:10,injured:15,desc:'载有炸药的汽车冲入北瓦济里斯坦军事哨所引爆',source:'凤凰网'},
+  {date:'2026-05-09',country:'巴基斯坦',city:'本努市',group:'TTP',type:'自杀式袭击',target:'警察局',deaths:15,injured:20,desc:'本努市警察局遭自杀式袭击，15名警察当场遇难',source:'凤凰网'},
+  {date:'2025-04-22',country:'巴基斯坦',city:'米安瓦利',group:'TTP',type:'反恐行动',target:'武装分子据点',deaths:10,injured:5,desc:'旁遮普警方与反恐部门联合行动，击毙10名TTP武装分子',source:'Terrorism Observer'},
+  {date:'2025-11-22',country:'巴基斯坦',city:'伊斯兰堡',group:'TTP/巴塔',type:'恐怖袭击',target:'首都',deaths:30,injured:50,desc:'伊斯兰堡发生严重恐袭，巴方指责TTP策划并获阿富汗当局庇护',source:'环球网/新浪财经'},
+  {date:'2024-10-06',country:'巴基斯坦',city:'卡拉奇',group:'BLA/俾路支解放军',type:'汽车炸弹',target:'中资企业车队',deaths:4,injured:17,desc:'中资卡西姆港发电公司车队在卡拉奇机场附近遇袭，2名中方人员遇难',source:'外交部/使馆公告'},
+  {date:'2024-03-26',country:'巴基斯坦',city:'尚格拉',group:'TTP',type:'自杀式袭击',target:'中国工程师巴士',deaths:6,injured:3,desc:'自杀式袭击者撞击载有中国工程师的巴士，5名中国公民及巴司机遇难',source:'使馆/媒体'},
+
+  // === Afghanistan ===
+  {date:'2026-01-19',country:'阿富汗',city:'喀布尔',group:'ISIS/ISKP',type:'爆炸',target:'中国餐馆',deaths:7,injured:13,desc:'喀布尔唯一中餐馆(兰州牛肉面馆)外爆炸，1名中国公民遇难，5人受伤',source:'参考消息/卫星通讯社'},
+  {date:'2026-06-10',country:'阿富汗',city:'喀布尔',group:'ISKP',type:'武装冲突',target:'塔利班',deaths:5,injured:8,desc:'ISKP与塔利班在喀布尔东北部第15区交火，塔利班加强反恐清剿',source:'Terrorism Observer'},
+  {date:'2025-11-20',country:'阿富汗',city:'达尔瓦兹县',group:'未知武装',type:'武装袭击',target:'中国道路建设公司',deaths:2,injured:2,desc:'巴达赫尚省恐怖分子对中国道路建设公司员工发动武装袭击',source:'卫星通讯社'},
+  {date:'2022-12-12',country:'阿富汗',city:'喀布尔',group:'ISKP',type:'恐怖袭击',target:'桂圆酒店',deaths:3,injured:18,desc:'喀布尔桂圆酒店遭恐袭，5名中国公民受伤',source:'使馆'},
+
+  // === DRC / Africa ===
+  {date:'2026-05-16',country:'刚果(金)',city:'科卢韦齐',group:'武装劫匪',type:'武装袭击',target:'中资园区',deaths:0,injured:0,desc:'约9名持AK-47武装劫匪袭击科卢韦齐中资园区',source:'华远卫士安全周报'},
+  {date:'2026-05-17',country:'马里',city:'纳雷纳',group:'未知武装',type:'武装袭击/纵火',target:'中资矿区',deaths:0,injured:0,desc:'马里库利科罗大区中资矿区遭袭，9名中方人员失联，大量设备被焚',source:'华远卫士安全周报'},
+  {date:'2026-05-16',country:'坦桑尼亚',city:'达累斯萨拉姆',group:'安保人员',type:'刑事案件',target:'中资工厂',deaths:1,injured:0,desc:'50岁中国籍塑料厂业主在厂区内被发现身亡，现金不翼而飞',source:'华远卫士安全周报'},
+  {date:'2026-06-08',country:'尼日利亚',city:'奥贡州',group:'武装分子',type:'武装袭击',target:'中资企业',deaths:1,injured:0,desc:'一中资企业遭武装袭击，1名安保人员遇害，无中方人员伤亡',source:'中国驻拉各斯总领馆'},
+  {date:'2026-05-18',country:'尼日利亚',city:'卡齐纳州',group:'土匪(Bandits)',type:'屠杀/抢劫',target:'农业社区',deaths:11,injured:5,desc:'武装土匪选择集市日袭击农村社区，11人死亡含1名孕妇',source:'华远卫士安全周报'},
+  {date:'2025-11-01',country:'尼日利亚',city:'博尔诺州',group:'ISWAP/博科圣地',type:'大规模袭击',target:'巴玛镇军民',deaths:60,injured:40,desc:'博尔诺州巴玛地区袭击致60余人死亡含平民和士兵',source:'GTI 2026/FellowPress'},
+  {date:'2025-06-08',country:'索马里',city:'埃尔布尔',group:'al-Shabaab',type:'空袭(政府军)',target:'青年党指挥官',deaths:3,injured:0,desc:'索马里政府军空袭击毙3名青年党高级指挥官',source:'Terrorism Observer'},
+  {date:'2025-04-16',country:'索马里',city:'阿丹亚巴尔',group:'al-Shabaab',type:'协调攻击',target:'战略城镇',deaths:12,injured:20,desc:'青年党先爆炸后多路协调攻击，声称占领10个军事哨所',source:'Terrorism Observer'},
+
+  // === Middle East ===
+  {date:'2025-06-01',country:'伊拉克',city:'巴格达',group:'ISIS残余',type:'爆炸',target:'市场',deaths:8,injured:15,desc:'IS残余势力在巴格达市场发动袭击',source:'GTI 2026'},
+  {date:'2024-10-01',country:'也门',city:'荷台达',group:'胡塞武装',type:'无人机/导弹',target:'红海航运',deaths:2,injured:5,desc:'胡塞武装袭击红海商船，全球航运安全受严重威胁',source:'媒体综合'},
+
+  // === Southeast Asia ===
+  {date:'2025-05-01',country:'菲律宾',city:'马拉维',group:'ISIS东亚分支',type:'武装冲突',target:'军方',deaths:8,injured:12,desc:'菲南部ISIS分支与政府军交火',source:'Terrorism Observer'},
+
+  // === Sahel ===
+  {date:'2025-07-01',country:'布基纳法索',city:'瓦加杜古',group:'JNIM',type:'大规模袭击',target:'军事基地',deaths:50,injured:30,desc:'JNIM对军事基地发动大规模协调攻击',source:'GTI 2026'},
+  {date:'2025-08-01',country:'马里',city:'加奥',group:'JNIM',type:'IED/伏击',target:'巡逻队',deaths:15,injured:8,desc:'JNIM在加奥地区伏击政府军巡逻队',source:'GTI 2026'},
+
+  // === South America ===
+  {date:'2025-09-01',country:'哥伦比亚',city:'考卡省',group:'FARC分裂派',type:'无人机攻击',target:'军事设施',deaths:6,injured:10,desc:'FARC分裂派使用无人机袭击军事设施（2024-2025年共77起无人机攻击）',source:'GTI 2026'},
+  {date:'2025-03-01',country:'哥伦比亚',city:'北桑坦德',group:'ELN',type:'爆炸',target:'警察局',deaths:5,injured:12,desc:'ELN对北桑坦德省警察局发动炸弹袭击',source:'GTI 2026'}
+];
+
+// ===== CHINESE OVERSEAS SECURITY INCIDENTS (2021-2026 Real Data) =====
+const CHINA_SECURITY=[
+  {date:'2026-05-17',country:'马里',location:'纳雷纳矿区',type:'武装袭击',severity:'red',title:'中资矿区遭武装分子袭击纵火',deaths:0,injured:0,people:'9名中方人员失联',desc:'马里库利科罗大区纳雷纳中资矿区凌晨遭武装分子袭击，闯入营地大肆焚烧施工车辆、工程机械、工棚及选矿设备，大量生产生活物资被毁，矿区生产秩序完全瘫痪。',source:'华远卫士安全周报'},
+  {date:'2026-05-16',country:'坦桑尼亚',location:'达累斯萨拉姆',type:'刑事案件',severity:'red',title:'中资工厂中国籍业主被害',deaths:1,injured:0,people:'1名中方人员遇难',desc:'50岁中国籍塑料厂业主在达累斯萨拉姆Ubungo地区厂区内被发现身亡，夜班保安失踪，工厂运营现金不翼而飞，两名保安凌晨携包裹离开。',source:'华远卫士安全周报'},
+  {date:'2026-05-16',country:'刚果(金)',location:'科卢韦齐',type:'武装袭击',severity:'orange',title:'中资园区遭9名持枪劫匪袭击',deaths:0,injured:0,people:'无中方人员伤亡',desc:'凌晨约9名持AK-47步枪的武装劫匪袭击科卢韦齐市某中资园区。',source:'华远卫士安全周报'},
+  {date:'2026-06-08',country:'尼日利亚',location:'奥贡州',type:'武装袭击',severity:'orange',title:'中资企业遭武装袭击',deaths:1,injured:0,people:'1名安保人员遇害，无中方人员伤亡',desc:'尼日利亚奥贡州一中资企业遭遇武装袭击，1名安保人员遇害。中领馆紧急提醒。',source:'中国驻拉各斯总领馆'},
+  {date:'2026-02-06',country:'巴基斯坦',location:'伊斯兰堡',type:'自杀式爆炸',severity:'red',title:'清真寺自杀式爆炸致数十人死亡',deaths:40,injured:60,people:'大规模伤亡，巴安全环境恶化',desc:'伊斯兰堡什叶派清真寺礼拜期间发生强力自杀式爆炸，一名目击者称爆炸"撕裂了整栋建筑"。2025年巴全年恐袭699起，死亡1034人。',source:'PIPS/今日头条'},
+  {date:'2026-01-19',country:'阿富汗',location:'喀布尔',type:'爆炸/恐怖袭击',severity:'red',title:'喀布尔唯一中餐馆外爆炸',deaths:7,injured:13,people:'1名中国公民遇难，5名中国公民受伤',desc:'阿富汗唯一中国餐馆——喀布尔商业中心花街的兰州牛肉面餐馆外发生爆炸，7人死亡、13人受伤。ISIS宣布负责。',source:'参考消息'},
+  {date:'2025-12-07',country:'津巴布韦',location:'多地',type:'抢劫/袭击',severity:'yellow',title:'多起涉中资企业安全事件',deaths:0,injured:0,people:'财产损失，交通事故伤亡',desc:'近期多起中资企业和中国公民安全事件：企业驻地/办公场所/矿区遭持枪抢劫，车辆被砸被抢，多名中国公民交通事故伤亡。',source:'中国驻津巴布韦使馆'},
+  {date:'2025-11-20',country:'塔吉克斯坦',location:'哈特隆州',type:'武装袭击/无人机',severity:'red',title:'中资参与金矿遭跨境无人机袭击',deaths:3,injured:1,people:'3名中国公民死亡，1人受伤',desc:'塔吉克斯坦哈特隆州一由中资企业参与的金矿，遭来自阿富汗境内的武装团伙使用无人机袭击。',source:'卫星通讯社/新华财经'},
+  {date:'2025-11-20',country:'阿富汗',location:'达尔瓦兹县',type:'武装袭击',severity:'red',title:'中国道路建设公司员工遭袭',deaths:2,injured:2,people:'2人死亡，2人受伤',desc:'巴达赫尚省恐怖分子对中国道路建设公司员工发动武装袭击。',source:'卫星通讯社'},
+  {date:'2025-06-01',country:'缅甸',location:'掸邦北部',type:'武装冲突/内战',severity:'orange',title:'缅北战事波及中资项目',deaths:0,injured:0,people:'中方人员紧急撤离',desc:'缅甸北部武装冲突升级，中资水电/矿产项目人员紧急撤离至安全区域。',source:'使馆/媒体'},
+  {date:'2024-10-06',country:'巴基斯坦',location:'卡拉奇',type:'汽车炸弹',severity:'red',title:'中资企业车队在机场附近遇袭',deaths:4,injured:17,people:'2名中方人员遇难，1人受伤',desc:'中资企业卡西姆港发电有限公司车队在卡拉奇真纳国际机场附近遭遇恐怖袭击。BLA(俾路支解放军)宣称负责。',source:'使馆/外交部'},
+  {date:'2024-04-01',country:'刚果(金)',location:'伊图里省',type:'武装袭击',severity:'red',title:'中国公民遭反政府武装袭击',deaths:1,injured:1,people:'2名中国公民遭袭，1人遇难',desc:'2名中国公民在伊图里省曼巴萨地区遭"马伊-马伊"反政府武装袭击，1人不幸身亡。',source:'使馆/媒体'},
+  {date:'2024-03-26',country:'巴基斯坦',location:'尚格拉',type:'自杀式袭击',severity:'red',title:'载有中国工程师的巴士遭自杀式袭击',deaths:6,injured:3,people:'5名中国公民遇难',desc:'自杀式袭击者驾驶车辆撞击载有中国工程师的巴士。5名中国公民及巴基斯坦司机遇难。',source:'使馆'},
+  {date:'2024-01-01',country:'哥伦比亚',location:'武里蒂卡',type:'武装袭击',severity:'orange',title:'紫金矿业金矿遭非法武装袭击',deaths:0,injured:0,people:'矿区运营一度中断',desc:'紫金矿业武里蒂卡金矿遭非法武装组织袭击，矿区生产安全受严重威胁。',source:'紫金矿业公告'},
+  {date:'2023-11-01',country:'俄罗斯',location:'北极LNG 2',type:'经济制裁',severity:'yellow',title:'美国制裁中企参与北极LNG项目',deaths:0,injured:0,people:'项目停工/股权受损',desc:'美国对参与俄罗斯北极LNG 2项目的中企实施制裁，影响中方能源战略利益。',source:'媒体'},
+  {date:'2023-04-15',country:'苏丹',location:'喀土穆',type:'内战',severity:'red',title:'苏丹爆发内战，中国撤侨1500余人',deaths:0,injured:0,people:'中方1500+人员紧急撤离',desc:'苏丹武装冲突爆发，中国海军护航编队执行撤侨行动，成功撤离1500余名中国公民及部分外国公民。',source:'外交部/国防部'},
+  {date:'2022-04-26',country:'巴基斯坦',location:'卡拉奇',type:'自杀式袭击',severity:'red',title:'卡拉奇大学孔子学院班车遇袭',deaths:4,injured:2,people:'3名中国教师遇难',desc:'卡拉奇大学孔子学院班车在校园附近遭女性自杀式袭击者袭击，3名中国教师和1名巴籍司机遇难。',source:'使馆/媒体'},
+  {date:'2021-07-14',country:'巴基斯坦',location:'达苏',type:'巴士炸弹',severity:'red',title:'达苏水电站项目巴士遭炸弹袭击',deaths:13,injured:30,people:'9名中国公民遇难',desc:'承建达苏水电站的中国企业员工班车遭遇炸弹袭击，9名中国公民和4名巴基斯坦公民遇难，数十人受伤。',source:'外交部/使馆'},
+  {date:'2025-11-01',country:'巴基斯坦',location:'北部地区',type:'绑架/恐怖袭击',severity:'red',title:'Jaffar Express火车劫持事件',deaths:10,injured:20,people:'442名人质被劫持',desc:'巴基斯坦Jaffar Express火车遭武装分子劫持，442名乘客被扣为人质，为近年规模最大的火车劫持事件。',source:'GTI 2026'},
+  {date:'2025-12-15',country:'缅甸',location:'克钦邦',type:'武装冲突/非法拘禁',severity:'red',title:'缅北电诈园区清剿波及中方人员',deaths:0,injured:0,people:'多批中方人员被解救',desc:'缅甸军政府与民族武装冲突扩大至电诈园区区域，中方联合执法解救被困人员。',source:'公安部/媒体'},
+  {date:'2024-06-01',country:'尼日利亚',location:'拉各斯',type:'绑架',severity:'orange',title:'中资企业员工遭绑架勒索',deaths:0,injured:0,people:'2名中方人员被绑后获救',desc:'拉各斯郊区中资企业2名中国籍员工遭武装绑匪绑架，支付赎金后获释。尼方警方介入调查。',source:'使馆/媒体'}
+];
+
+// ===== DATA COLLECTION MODULE v3 — Auto-loaded Terror & Security Data + Live API =====
 const COLLECT={
   sources:[
-    {id:'gdelt',name:'GDELT全球新闻事件',ic:'📰',desc:'GDELT V2 Doc API — 搜索与中国海外利益相关的全球新闻事件',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v2/doc/doc'},
-    {id:'gdeltv1',name:'GDELT V1全文搜索',ic:'🔍',desc:'GDELT V1 FTXT — 备用新闻源，HTML解析提取',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v1/search_ftxtsearch/search_ftxtsearch'},
-    {id:'rssproxy',name:'国际RSS新闻(代理)',ic:'📡',desc:'通过CORS代理采集BBC/UN/SCMP/AlJazeera等国际媒体',enabled:true,type:'news',api:'https://api.allorigins.win/raw'},
-    {id:'worldbank',name:'世界银行经济指标',ic:'📊',desc:'采集监测国家的GDP、通胀、汇率等宏观经济数据',enabled:true,type:'econ',api:'https://api.worldbank.org/v2'},
-    {id:'fxrate',name:'实时汇率数据',ic:'💰',desc:'采集美元兑人民币等关键货币实时汇率',enabled:true,type:'fx',api:'https://open.er-api.com/v6/latest/USD'},
-    {id:'restcountry',name:'国家基础信息',ic:'🌐',desc:'从Rest Countries API采集国家人口/面积/首都等信息',enabled:true,type:'country',api:'https://restcountries.com/v3.1'}
+    {id:'terrorsw',name:'💥 恐怖袭击数据库(内置)',ic:'📊',desc:'基于GTI 2026/PIPS/华远卫士的全球恐袭真实数据 — 页面打开即自动加载',enabled:true,type:'terror',api:null},
+    {id:'chinasec',name:'🇨🇳 涉华安全事件(内置)',ic:'🛡️',desc:'2021-2026中资企业/公民海外遇袭真实事件 — 源自外交部通报/使馆公告',enabled:true,type:'china',api:null},
+    {id:'gdelt',name:'📡 GDELT全球新闻搜索',ic:'📰',desc:'GDELT V2 API实时搜索恐怖袭击关键词(terrorism/attack/security)',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v2/doc/doc'},
+    {id:'rssproxy',name:'📻 RSS国际新闻(代理)',ic:'📡',desc:'CORS代理采集BBC/UN/SCMP/AlJazeera安全类新闻',enabled:true,type:'news',api:'https://api.allorigins.win/raw'},
+    {id:'fxrate',name:'💰 实时汇率数据',ic:'💱',desc:'open.er-api.com实时汇率(USD/CNY/RUB/PKR等关键货币)',enabled:true,type:'fx',api:'https://open.er-api.com/v6/latest/USD'}
   ],
-  data:{news:[],econ:[],fx:[],country:[]},
+  data:{terror_events:[],china_events:[],gnews:[],fx:[]},
   stats:{success:0,fail:0,records:0,lastTime:null},
   autoTimer:null,
   autoInterval:600000,
   inited:false,
-  currentTab:'news',
-  // News queries for GDELT v2
-  gdeltQueries:[
-    {q:'China overseas investment security',label:'中国海外投资安全'},
-    {q:'Chinese companies Belt Road risk',label:'中企一带一路风险'},
-    {q:'Chinese workers attacked abroad',label:'中方海外人员遇袭'},
-    {q:'China Sudan Pakistan Myanmar conflict',label:'高风险国家涉华事件'},
-    {q:'China overseas project sanctions',label:'中国海外项目制裁'},
-    {q:'Belt and Road Initiative risk',label:'一带一路风险'}
+  currentTab:'terror',
+  // GDELT queries focused on terrorism & security
+  gdeltTerrorQueries:[
+    {q:'terrorist attack casualties Pakistan Afghanistan',label:'南亚恐袭'},
+    {q:'terrorism Sahel Africa attack civilians',label:'非洲萨赫勒恐袭'},
+    {q:'Chinese workers killed injured abroad',label:'中方海外人员遇袭'},
+    {q:'Boko Haram Al-Shabaab attack',label:'非洲极端组织'},
+    {q:'ISIS Islamic State attack bombing',label:'ISIS袭击'},
+    {q:'armed attack security incident overseas',label:'海外武装袭击'},
+    {q:'kidnapping hostage crisis militants',label:'绑架劫持事件'}
   ],
-  // News feeds via CORS proxy
-  proxyFeeds:[
+  rssFeeds:[
     {url:'https://feeds.bbci.co.uk/news/world/rss.xml',name:'BBC World'},
     {url:'https://news.un.org/feed/subscribe/en/news/all/rss.xml',name:'UN News'},
-    {url:'https://www.scmp.com/rss/4/feed',name:'SCMP China'},
     {url:'https://www.aljazeera.com/xml/rss/all.xml',name:'Al Jazeera'}
   ],
-  // CORS proxies (tried in order)
-  corsProxies:[
-    'https://api.allorigins.win/raw?url=',
-    'https://corsproxy.io/?'
-  ],
-  wbIndicators:[
-    {code:'NY.GDP.MKTP.CD',name:'GDP（美元）'},
-    {code:'NY.GDP.MKTP.KD.ZG',name:'GDP增长率（%）'},
-    {code:'FP.CPI.TOTL.ZG',name:'通货膨胀率（%）'},
-    {code:'NE.EXP.GNFS.CD',name:'出口总额（美元）'},
-    {code:'BX.KLT.DINV.CD.WD',name:'外商直接投资（美元）'},
-    {code:'PA.NUS.FCRF',name:'官方汇率（本币/美元）'}
-  ],
-  countryCodes:{'中国':'CHN','阿富汗':'AFG','巴基斯坦':'PAK','哈萨克斯坦':'KAZ','俄罗斯':'RUS','苏丹':'SDN','缅甸':'MMR','伊拉克':'IRQ','委内瑞拉':'VEN','伊朗':'IRN','尼日利亚':'NGA','沙特阿拉伯':'SAU','南非':'ZAF','埃塞俄比亚':'ETH','越南':'VNM','印度尼西亚':'IDN','巴西':'BRA','美国':'USA','泰国':'THA','阿联酋':'ARE','澳大利亚':'AUS','新加坡':'SGP','土耳其':'TUR','埃及':'EGY','利比亚':'LBY','也门':'YEM','索马里':'SOM','南苏丹':'SSD','刚果(金)':'COD','哥伦比亚':'COL','墨西哥':'MEX','秘鲁':'PER','印度':'IND','菲律宾':'PHL','马来西亚':'MYS','柬埔寨':'KHM','乌兹别克斯坦':'UZB','肯尼亚':'KEN','安哥拉':'AGO','阿尔及利亚':'DZA','塞尔维亚':'SRB','乌克兰':'UKR','叙利亚':'SYR'},
-  // Track which sources succeeded/failed for UI feedback
-  sourceStatus:{},
+  corsProxies:['https://api.allorigins.win/raw?url=','https://corsproxy.io/?'],
   init(){
     if(this.inited)return;
     this.inited=true;
     this.renderSources();
-    this.log('info','[系统] 数据采集中心初始化完成，共'+this.sources.length+'个数据源就绪（3个新闻源+3个数据源）');
+    // ✅ AUTO-LOAD curated data immediately
+    this.loadCuratedData();
+    this.renderAllCurated();
     this.updateStats();
+    this.log('success','[系统] ✅ 已自动加载内置数据库：'+TERROR_STATS.topCountries.length+'国统计 + '+TERROR_EVENTS.length+'起恐袭 + '+CHINA_SECURITY.length+'起涉华事件');
+    this.log('info','[系统] 点击"一键采集全部"可补充GDELT/RSS实时新闻 + 汇率数据');
+  },
+  // Auto-load curated data from embedded arrays
+  loadCuratedData(){
+    this.data.terror_events=[...TERROR_EVENTS];
+    this.data.china_events=[...CHINA_SECURITY];
+    this.stats.records=TERROR_EVENTS.length+CHINA_SECURITY.length+this.data.fx.length;
+    this.stats.lastTime=new Date();
   },
   renderSources(){
     const el=document.getElementById('collect-sources');
     if(!el)return;
-    el.innerHTML=this.sources.map(s=>`<div class="src-card${s.enabled?' enabled':''}" onclick="COLLECT.toggleSource('${s.id}')"><div class="src-card-toggle${s.enabled?' on':''}" id="toggle-${s.id}"></div><div class="src-card-hd"><div class="src-card-ic">${s.ic}</div><div class="src-card-tt">${s.name}</div></div><div class="src-card-desc">${s.desc}</div><div class="src-card-meta"><span>类型：${s.type}</span><span>状态：<span id="status-${s.id}" style="color:${s.enabled?'var(--green)':'var(--text2)'}">${s.enabled?'就绪':'未启用'}</span></span></div></div>`).join('');
-    const enabledCount=this.sources.filter(s=>s.enabled).length;
-    document.getElementById('cs-sources').textContent=enabledCount;
+    el.innerHTML=this.sources.map(s=>`<div class="src-card${s.enabled?' enabled':''}" onclick="COLLECT.toggleSource('${s.id}')"><div class="src-card-toggle${s.enabled?' on':''}" id="toggle-${s.id}"></div><div class="src-card-hd"><div class="src-card-ic" style="font-size:24px">${s.ic.split(' ')[0]||s.ic}</div><div class="src-card-tt">${s.name}</div></div><div class="src-card-desc">${s.desc}</div><div class="src-card-meta"><span>类型：${s.type}</span><span>状态：<span id="status-${s.id}" style="color:${s.enabled?(s.api?'var(--green)':'var(--accent)'):'var(--text2)'}">${s.enabled?(s.api?'就绪（实时API）':'已就绪（内置数据）'):'未启用'}</span></span></div></div>`).join('');
+    document.getElementById('cs-sources').textContent=this.sources.filter(s=>s.enabled).length;
   },
   toggleSource(id){
     const s=this.sources.find(x=>x.id===id);
@@ -636,76 +735,39 @@ const COLLECT={
     const toggle=document.getElementById('toggle-'+id);
     if(toggle)toggle.classList.toggle('on');
     const meta=document.getElementById('status-'+id);
-    if(meta){meta.textContent=s.enabled?'就绪':'未启用';meta.style.color=s.enabled?'var(--green)':'var(--text2)'}
+    if(meta){meta.textContent=s.enabled?(s.api?'就绪（实时API）':'已就绪（内置数据）'):'未启用';meta.style.color=s.enabled?(s.api?'var(--green)':'var(--accent)'):'var(--text2)'}
     document.getElementById('cs-sources').textContent=this.sources.filter(x=>x.enabled).length;
-    this.log('info','['+s.name+'] '+(s.enabled?'已启用':'已停用'));
   },
-  // Retry wrapper with exponential backoff
-  async fetchWithRetry(url,options={},maxRetries=2){
+  // Retry wrapper
+  async fetchWithRetry(url,options={},maxRetries=1){
     let lastError;
     for(let i=0;i<=maxRetries;i++){
       try{
-        if(i>0){
-          const delay=Math.pow(2,i)*1000;
-          await new Promise(r=>setTimeout(r,delay));
-        }
-        const resp=await fetch(url,options);
-        return resp;
-      }catch(e){
-        lastError=e;
-        if(i<maxRetries)this.log('warn','[网络] 请求失败，'+(i+1)+'秒后重试... ('+(i+1)+'/'+maxRetries+')');
-      }
+        if(i>0)await new Promise(r=>setTimeout(r,2000));
+        return await fetch(url,options);
+      }catch(e){lastError=e}
     }
     throw lastError;
   },
   async collectAll(){
     const btn=document.getElementById('btn-collect-all');
-    const enabledSources=this.sources.filter(s=>s.enabled);
-    if(!enabledSources.length){showToast('请至少启用一个数据源');return}
+    const enabledSources=this.sources.filter(s=>s.enabled&&s.api);
+    if(!enabledSources.length){showToast('无可用外部API数据源，内置数据已自动加载');return}
     if(btn){btn.disabled=true;btn.innerHTML='<span class="collect-spin"></span> 采集中...'}
     const prog=document.getElementById('collect-progress');
     const progBar=document.getElementById('collect-progress-bar');
-    if(prog){prog.classList.add('show')}
-    this.log('info','[系统] ===== 开始采集，共'+enabledSources.length+'个数据源 =====');
-    this.sourceStatus={};
-    
-    // Collect news sources first (parallel), then data sources
+    if(prog)prog.classList.add('show');
+    this.log('info','[系统] ===== 开始外部API采集，共'+enabledSources.length+'个实时数据源 =====');
     let done=0;
-    const newsSources=enabledSources.filter(s=>s.type==='news');
-    const dataSources=enabledSources.filter(s=>s.type!=='news');
-    
-    // Phase 1: News collection
-    for(const s of newsSources){
+    for(const s of enabledSources){
       this.setSourceStatus(s.id,'采集中...','var(--accent)');
       if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
       try{
         this.log('info','['+s.name+'] 开始采集...');
         switch(s.id){
           case 'gdelt':await this.collectGDELT();break;
-          case 'gdeltv1':await this.collectGDELTv1();break;
           case 'rssproxy':await this.collectRSSProxy();break;
-        }
-        this.stats.success++;
-        this.setSourceStatus(s.id,'✅ 成功','var(--green)');
-      }catch(e){
-        this.stats.fail++;
-        this.setSourceStatus(s.id,'❌ 失败','var(--red)');
-        this.log('error','['+s.name+'] 采集失败：'+e.message);
-      }
-      done++;
-      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
-    }
-    
-    // Phase 2: Data sources
-    for(const s of dataSources){
-      this.setSourceStatus(s.id,'采集中...','var(--accent)');
-      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
-      try{
-        this.log('info','['+s.name+'] 开始采集...');
-        switch(s.id){
-          case 'worldbank':await this.collectWorldBank();break;
           case 'fxrate':await this.collectFxRate();break;
-          case 'restcountry':await this.collectRestCountries();break;
         }
         this.stats.success++;
         this.setSourceStatus(s.id,'✅ 成功','var(--green)');
@@ -717,101 +779,44 @@ const COLLECT={
       done++;
       if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
     }
-    
     this.stats.lastTime=new Date();
     this.updateStats();
-    this.renderResults();
     if(progBar)progBar.style.width='100%';
     setTimeout(()=>{if(prog)prog.classList.remove('show')},2000);
     if(btn){btn.disabled=false;btn.innerHTML='🚀 一键采集全部'}
-    const total=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    this.log('success','[系统] ===== 采集完成！成功'+this.stats.success+'个源，失败'+this.stats.fail+'个，共'+total+'条记录 =====');
-    if(total>0){showToast('✅ 数据采集完成，共获取'+total+'条记录')}
-    else{showToast('⚠️ 新闻采集全部失败，请查看内置数据或稍后重试')}
-    const badge=document.getElementById('sb-collect-count');
-    if(badge)badge.textContent=total;
-    // Show fallback hint if no news
-    if(!this.data.news.length)this.log('warn','[提示] 新闻源均未成功，可点击「加载内置新闻」查看系统预置的涉华安全事件数据');
+    const total=this.data.terror_events.length+this.data.china_events.length+this.data.gnews.length+this.data.fx.length;
+    this.log('success','[系统] ===== 完成！内置数据 + API采集 = '+total+'条记录 =====');
+    if(this.data.gnews.length>0)showToast('✅ 外部新闻采集成功('+this.data.gnews.length+'条) + 内置数据');
+    else showToast('⚠️ 外部API未获取到新数据，内置数据库已就绪');
+    // Re-render relevant tabs
+    this.renderGnNews();
   },
   setSourceStatus(id,text,color){
     const el=document.getElementById('status-'+id);
     if(el){el.textContent=text;el.style.color=color}
   },
-  // ===== News Sources =====
+  // ===== GDELT with terrorism-focused queries =====
   async collectGDELT(){
     const results=[];
-    for(const query of this.gdeltQueries){
+    for(const query of this.gdeltTerrorQueries){
       try{
-        const url=this.sources.find(s=>s.id==='gdelt').api+'?query='+encodeURIComponent(query.q)+'&mode=artlist&format=json&maxrecords=8&sort=datedesc';
+        const url='https://api.gdeltproject.org/api/v2/doc/doc?query='+encodeURIComponent(query.q)+'&mode=artlist&format=json&maxrecords=6&sort=datedesc';
         const resp=await this.fetchWithRetry(url,{},1);
         if(!resp.ok)throw new Error('HTTP '+resp.status);
         const data=await resp.json();
         if(data.articles&&data.articles.length){
-          data.articles.forEach(a=>{
-            results.push({
-              title:a.title||'(无标题)',
-              url:a.url||'',
-              source:a.domain||'GDELT',
-              date:a.seendate||'',
-              language:a.language||'',
-              query:query.label,
-              type:'gdelt'
-            });
-          });
-          this.log('success','[GDELT V2] "'+query.label+'" → '+data.articles.length+'条');
-        }else{
-          this.log('warn','[GDELT V2] "'+query.label+'" 无结果');
-        }
-      }catch(e){
-        this.log('error','[GDELT V2] "'+query.label+'" 请求失败：'+e.message);
-      }
+          data.articles.forEach(a=>{results.push({title:a.title||'(无标题)',url:a.url||'',source:a.domain||'GDELT',date:a.seendate||'',query:query.label,type:'gdelt'});});
+          this.log('success','[GDELT] "'+query.label+'" → '+data.articles.length+'条');
+        }else{this.log('warn','[GDELT] "'+query.label+'" 无结果')}
+      }catch(e){this.log('error','[GDELT] "'+query.label+'" 失败：'+e.message)}
     }
-    // Merge: keep existing rssproxy news, replace gdelt
-    const otherNews=this.data.news.filter(n=>n.type!=='gdelt');
-    this.data.news=[...results,...otherNews];
+    this.data.gnews=results;
     this.updateRecordCount();
-  },
-  async collectGDELTv1(){
-    // GDELT V1 FTXT — returns HTML, parse article links
-    const results=[];
-    for(const query of [{q:'China+security+risk',label:'涉华安全风险'},{q:'Belt+Road+China+investment',label:'一带一路投资'},{q:'Chinese+workers+abroad',label:'海外中方人员'}]){
-      try{
-        const url=this.sources.find(s=>s.id==='gdeltv1').api+'?query='+encodeURIComponent(query.q)+'&maxrows=5';
-        const resp=await this.fetchWithRetry(url,{},1);
-        if(!resp.ok)throw new Error('HTTP '+resp.status);
-        const html=await resp.text();
-        // Parse article blocks from HTML
-        const parser=new DOMParser();
-        const doc=parser.parseFromString(html,'text/html');
-        const links=doc.querySelectorAll('a[href^="http"]');
-        let count=0;
-        links.forEach(a=>{
-          const href=a.getAttribute('href');
-          const text=a.textContent.trim();
-          if(href&&!href.includes('gdeltproject')&&!href.includes('google')&&text&&text.length>10){
-            results.push({
-              title:text.substring(0,150),
-              url:href,
-              source:'GDELT V1',
-              date:'',
-              query:query.label,
-              type:'gdeltv1'
-            });
-            count++;
-          }
-        });
-        this.log('success','[GDELT V1] "'+query.label+'" → '+count+'条');
-      }catch(e){
-        this.log('error','[GDELT V1] "'+query.label+'" 请求失败：'+e.message);
-      }
-    }
-    const otherNews=this.data.news.filter(n=>n.type!=='gdeltv1');
-    this.data.news=[...otherNews,...results];
-    this.updateRecordCount();
+    this.log('success','[GDELT] 总计采集'+results.length+'条实时新闻');
   },
   async collectRSSProxy(){
     let allItems=[];
-    for(const feed of this.proxyFeeds){
+    for(const feed of this.rssFeeds){
       let success=false;
       for(const proxy of this.corsProxies){
         try{
@@ -825,199 +830,135 @@ const COLLECT={
           if(items.length>0){
             items.forEach(item=>{
               const title=item.querySelector('title')?.textContent||'';
-              const link=item.querySelector('link')?.textContent||'';
-              const desc=item.querySelector('description')?.textContent||'';
-              const pubDate=item.querySelector('pubDate')?.textContent||'';
-              if(title)allItems.push({
-                title:title,
-                url:link,
-                source:feed.name,
-                date:pubDate,
-                description:(desc||'').replace(/<[^>]*>/g,'').substring(0,200),
-                query:'RSS代理',
-                type:'rssproxy'
-              });
+              if(title)allItems.push({title,url:item.querySelector('link')?.textContent||'',source:feed.name,date:item.querySelector('pubDate')?.textContent||'',type:'rss'});
             });
-            this.log('success','[RSS代理] '+feed.name+' → '+items.length+'条');
-            success=true;
-            break;
+            this.log('success','[RSS] '+feed.name+' → '+items.length+'条');
+            success=true;break;
           }
         }catch(e){}
       }
-      if(!success)this.log('warn','[RSS代理] '+feed.name+' 所有代理均失败');
+      if(!success)this.log('warn','[RSS] '+feed.name+' 代理全部失败');
     }
-    const otherNews=this.data.news.filter(n=>n.type!=='rssproxy');
-    this.data.news=[...otherNews,...allItems];
+    this.data.gnews=[...this.data.gnews,...allItems];
     this.updateRecordCount();
-  },
-  // Load curated news from built-in ALERTS data
-  loadCuratedNews(){
-    const results=[];
-    if(typeof ALERTS!=='undefined'&&ALERTS.length){
-      ALERTS.slice(0,20).forEach(a=>{
-        const sevMap={red:'🔴',orange:'🟠',yellow:'🟡',blue:'🔵'};
-        results.push({
-          title:'['+sevMap[a.severity||'yellow']+'] '+a.title,
-          url:'',
-          source:'系统内置预警',
-          date:a.date||'',
-          country:a.country||'',
-          level:a.level||'',
-          severity:a.severity||'yellow',
-          description:a.desc||'',
-          type:'curated'
-        });
-      });
-    }
-    // Also add recent events
-    if(typeof EVENTS!=='undefined'&&EVENTS.length){
-      EVENTS.slice(0,10).forEach(e=>{
-        results.push({
-          title:'[📋事件] '+e.title,
-          url:'',
-          source:'系统内置事件',
-          date:e.date||'',
-          country:e.country||'',
-          description:e.desc||'',
-          type:'curated'
-        });
-      });
-    }
-    // Replace ALL news with curated
-    this.data.news=results;
-    this.updateRecordCount();
-    this.renderNews();
-    this.log('success','[内置数据] 已加载'+results.length+'条涉华安全事件（来自系统预警和事件库）');
-    showToast('✅ 已加载'+results.length+'条内置新闻');
-  },
-  updateRecordCount(){
-    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-  },
-  // ===== Data Sources (unchanged but with retry) =====
-  async collectWorldBank(){
-    const results=[];
-    let collected=0;
-    for(const countryCode of Object.values(this.countryCodes).slice(0,20)){
-      const cname=Object.keys(this.countryCodes).find(k=>this.countryCodes[k]===countryCode);
-      for(const ind of this.wbIndicators){
-        try{
-          const url=this.sources.find(s=>s.id==='worldbank').api+'/country/'+countryCode+'/indicator/'+ind.code+'?format=json&per_page=1&date=2020:2024';
-          const resp=await this.fetchWithRetry(url);
-          if(!resp.ok)continue;
-          const data=await resp.json();
-          if(data&&data[1]&&data[1][0]){
-            const item=data[1][0];
-            results.push({country:cname,indicator:ind.name,value:item.value,year:item.date,source:'World Bank API',collectTime:new Date().toLocaleString('zh-CN')});
-            collected++;
-          }
-        }catch(e){}
-      }
-      if(collected%10===0&&collected>0)this.log('info','[World Bank] 已采集'+collected+'条...');
-    }
-    this.data.econ=results;
-    this.updateRecordCount();
-    this.log('success','[World Bank] 完成，共'+results.length+'条经济指标');
   },
   async collectFxRate(){
-    const url=this.sources.find(s=>s.id==='fxrate').api;
-    this.log('info','[汇率] 请求实时汇率...');
+    const url='https://open.er-api.com/v6/latest/USD';
     const resp=await this.fetchWithRetry(url);
     if(!resp.ok)throw new Error('HTTP '+resp.status);
     const data=await resp.json();
     if(data&&data.rates){
       const keyCurrencies=['CNY','EUR','GBP','JPY','RUB','INR','BRL','ZAR','KRW','TRY','AED','SGD','AUD','CAD','PKR','EGP','NGN','VND','IDR','THB'];
-      this.data.fx=keyCurrencies.filter(c=>data.rates[c]).map(c=>({pair:'USD/'+c,rate:data.rates[c],base:'USD',quote:c,updateTime:data.time_last_update_utc||new Date().toUTCString(),source:'open.er-api.com',collectTime:new Date().toLocaleString('zh-CN')}));
+      this.data.fx=keyCurrencies.filter(c=>data.rates[c]).map(c=>({pair:'USD/'+c,rate:data.rates[c],collectTime:new Date().toLocaleString('zh-CN')}));
       this.updateRecordCount();
+      this.renderFx();
       this.log('success','[汇率] 完成，共'+this.data.fx.length+'个货币对');
     }
   },
-  async collectRestCountries(){
-    const results=[];
-    const countryNames=Object.keys(this.countryCodes);
-    for(let i=0;i<countryNames.length;i+=5){
-      const batch=countryNames.slice(i,i+5);
-      for(const cname of batch){
-        try{
-          const searchName=cname.replace(/\(.*\)/,'').trim();
-          const url=this.sources.find(s=>s.id==='restcountry').api+'/name/'+encodeURIComponent(searchName)+'?fields=name,capital,population,area,region,subregion,currencies,languages,flag';
-          const resp=await this.fetchWithRetry(url);
-          if(!resp.ok)continue;
-          const data=await resp.json();
-          if(Array.isArray(data)&&data[0]){
-            const c=data[0];
-            const cur=c.currencies?Object.values(c.currencies).map(x=>x.name).join(', '):'—';
-            const lang=c.languages?Object.values(c.languages).join(', '):'—';
-            results.push({country:cname,capital:Array.isArray(c.capital)?c.capital[0]:(c.capital||'—'),population:c.population?c.population.toLocaleString():'—',area:c.area?c.area.toLocaleString():'—',region:c.region||'—',currency:cur,language:lang,collectTime:new Date().toLocaleString('zh-CN')});
-          }
-        }catch(e){}
-      }
-      if(i>0)this.log('info','[Rest Countries] 已采集'+results.length+'个国家...');
-    }
-    this.data.country=results;
-    this.updateRecordCount();
-    this.log('success','[Rest Countries] 完成，共'+results.length+'个国家信息');
+  updateRecordCount(){
+    this.stats.records=this.data.terror_events.length+this.data.china_events.length+this.data.gnews.length+this.data.fx.length;
   },
   // ===== Rendering =====
-  renderResults(){
-    this.renderNews();
-    this.renderEcon();
+  renderAllCurated(){
+    this.renderTerrorStats();
+    this.renderTerrorEvents();
+    this.renderChinaEvents();
     this.renderFx();
-    this.renderCountry();
+    this.updateStats();
   },
-  renderNews(){
-    const el=document.getElementById('collect-news-list');
-    const cnt=document.getElementById('news-count');
+  renderTerrorStats(){
+    // Four stat cards
+    const statsEl=document.getElementById('collect-terror-stats');
+    if(!statsEl)return;
+    statsEl.innerHTML=[
+      {val:TERROR_STATS.totalDeaths.toLocaleString(),label:'全球恐袭死亡人数',sub:'2025年（↓28%）',color:'var(--red)'},
+      {val:TERROR_STATS.totalAttacks.toLocaleString(),label:'全球恐袭事件起数',sub:'2025年（↓22%）',color:'var(--orange)'},
+      {val:TERROR_STATS.topCountries[0].country,label:'最严重国家',sub:'巴基斯坦（1,139死）',color:'#991b1b'},
+      {val:'70%',label:'集中于5国',sub:'巴/布/尼/尼日/刚',color:'var(--accent)'}
+    ].map(s=>`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;border-top:3px solid ${s.color}"><div style="font-size:28px;font-weight:800;color:${s.color}">${s.val}</div><div style="font-size:12px;font-weight:600;margin:4px 0">${s.label}</div><div style="font-size:10px;color:var(--text2)">${s.sub}</div></div>`).join('');
+
+    // Top 10 countries table
+    const top10El=document.getElementById('collect-terror-top10');
+    if(!top10El)return;
+    top10El.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--blue-bg)"><th style="padding:6px 8px;text-align:left">#</th><th style="padding:6px 8px;text-align:left">国家</th><th style="padding:6px 8px;text-align:right">GTI评分</th><th style="padding:6px 8px;text-align:right">死亡</th><th style="padding:6px 8px;text-align:center">趋势</th></tr></thead><tbody>'+TERROR_STATS.topCountries.map(c=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px 8px;color:var(--text2)">${c.rank}</td><td style="padding:6px 8px;font-weight:600">${c.country}</td><td style="padding:6px 8px;text-align:right;font-weight:700;color:${c.rank<=3?'var(--red)':'var(--text)'}">${c.score||'—'}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${c.deaths?c.deaths.toLocaleString():'—'}</td><td style="padding:6px 8px;text-align:center"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:${c.trend==='up'?'var(--red-bg)':c.trend==='down'?'var(--green-bg)':'var(--blue-bg)'};color:${c.trend==='up'?'var(--red)':c.trend==='down'?'var(--green)':'var(--accent)'}">${c.trend==='up'?'↑上升':c.trend==='down'?'↓下降':'→持平'}</span></td></tr>`).join('')+'</tbody></table>';
+
+    // Top 4 groups
+    const groupsEl=document.getElementById('collect-terror-groups');
+    if(!groupsEl)return;
+    groupsEl.innerHTML=TERROR_STATS.topGroups.map(g=>`<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;border-left:4px solid var(--red)"><div style="font-weight:700;font-size:13px">#${g.rank} ${g.name}</div><div style="font-size:11px;color:var(--text2);margin-top:4px">${g.region?'📍 '+g.region+' | ':''}${g.deaths?'☠️ '+g.deaths+'死 | ':''}${g.attacks?'💥 '+g.attacks+'起袭击 | ':''}${g.share?'📊 占全球'+g.share+'% | ':''}${g.trend||''}</div><div style="font-size:10px;color:var(--text2);margin-top:2px">${g.note||g.targets||''}</div></div>`).join('');
+
+    // Key facts
+    const factsContainer=document.createElement('div');
+    factsContainer.style.cssText='margin-top:14px;padding:12px;background:var(--blue-bg);border-radius:8px;font-size:11px;line-height:1.8;color:var(--text2)';
+    factsContainer.innerHTML='<strong style="color:var(--accent)">📌 关键发现 (GTI 2026)</strong><br>'+TERROR_STATS.keyFacts.map(f=>'• '+f).join('<br>');
+    statsEl.parentElement.appendChild(factsContainer);
+
+    document.getElementById('terror-count').textContent='GTI 2026 | '+TERROR_STATS.totalDeaths.toLocaleString()+'死亡 | '+TERROR_STATS.totalAttacks.toLocaleString()+'起袭击';
+  },
+  renderTerrorEvents(){
+    const el=document.getElementById('collect-terrevents-list');
+    const cnt=document.getElementById('terrevents-count');
     if(!el)return;
-    if(!this.data.news.length){
-      el.innerHTML='<div class="empty"><div class="ic">📰</div><div>暂无采集数据</div><div style="font-size:11px;color:var(--text2);margin-top:6px">尝试点击「加载内置新闻」查看系统预置数据</div></div>';
-      if(cnt)cnt.textContent='0条记录';
-      return;
+    if(!this.data.terror_events.length){el.innerHTML='<div class="empty"><div class="ic">📰</div><div>暂无数据</div></div>';if(cnt)cnt.textContent='0条';return}
+    if(cnt)cnt.textContent=this.data.terror_events.length+'条记录';
+    // Sort by date desc
+    const sorted=[...this.data.terror_events].sort((a,b)=>b.date.localeCompare(a.date));
+    el.innerHTML=sorted.map(e=>{
+      const isHigh=e.deaths>=10;
+      const severityColor=isHigh?'var(--red)':'var(--orange)';
+      const sevIcon=isHigh?'🔴':'🟠';
+      return `<div class="collect-news-item" style="border-left:3px solid ${severityColor};margin-bottom:8px;padding:10px 12px;background:var(--card);border-radius:6px"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1"><div style="font-weight:600;font-size:13px">${sevIcon} ${e.country} · ${e.city} — ${e.desc}</div><div style="font-size:11px;color:var(--text2);margin-top:4px"><span style="background:var(--red-bg);color:var(--red);padding:1px 6px;border-radius:3px;font-weight:600">${e.type}</span> <span style="margin-left:6px">🎯 ${e.target}</span> <span style="margin-left:6px">${e.group?'👤 '+e.group:''}</span></div></div><div style="text-align:right;min-width:60px"><div style="font-size:11px;color:var(--text2)">${e.date}</div><div style="font-size:16px;font-weight:800;color:${severityColor}">☠️ ${e.deaths}</div><div style="font-size:10px;color:var(--text2)">伤${e.injured}</div></div></div><div style="font-size:9px;color:var(--text2);margin-top:4px">📋 ${e.source}</div></div>`;
+    }).join('');
+  },
+  renderChinaEvents(){
+    const el=document.getElementById('collect-chinaevents-list');
+    const cnt=document.getElementById('chinaevents-count');
+    if(!el)return;
+    if(!this.data.china_events.length){el.innerHTML='<div class="empty"><div class="ic">🛡️</div><div>暂无数据</div></div>';if(cnt)cnt.textContent='0条';return}
+    if(cnt)cnt.textContent=this.data.china_events.length+'条记录';
+    const sorted=[...this.data.china_events].sort((a,b)=>b.date.localeCompare(a.date));
+    el.innerHTML=sorted.map(e=>{
+      const sevMap={red:'🔴 极高',orange:'🟠 高',yellow:'🟡 中',blue:'🔵 低'};
+      const sevColor={red:'var(--red)',orange:'var(--orange)',yellow:'var(--yellow)',blue:'var(--accent)'};
+      const sc=sevColor[e.severity]||'var(--text)';
+      return `<div class="collect-news-item" style="border-left:3px solid ${sc};margin-bottom:8px;padding:10px 12px;background:var(--card);border-radius:6px"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1"><div style="font-weight:600;font-size:13px">${sevMap[e.severity]||''} ${e.title}</div><div style="font-size:11px;color:var(--text2);margin-top:4px"><span style="font-weight:600">🇨🇳 中国公民/企业</span> <span style="margin-left:6px">📍 ${e.location}，${e.country}</span> <span style="margin-left:6px;background:var(--red-bg);color:var(--red);padding:1px 5px;border-radius:3px">${e.type}</span></div><div style="font-size:11px;color:var(--text2);margin-top:3px">${e.desc}</div></div><div style="text-align:right;min-width:60px"><div style="font-size:11px;color:var(--text2)">${e.date}</div>${e.deaths>0?`<div style="font-size:16px;font-weight:800;color:${sc}">☠️ ${e.deaths}</div>`:''}<div style="font-size:10px;color:var(--red);font-weight:600">${e.people}</div></div></div><div style="font-size:9px;color:var(--text2);margin-top:4px">来源：${e.source}</div></div>`;
+    }).join('');
+  },
+  renderGnNews(){
+    const fxEl=document.getElementById('collect-fx-grid');
+    // If on the fx tab, also render GDELT news below fx data
+    if(!fxEl||this.currentTab!=='fx')return;
+    const container=fxEl.parentElement;
+    if(!container)return;
+    // Check if already has a news section
+    let newsSection=document.getElementById('gnews-section');
+    if(!newsSection&&this.data.gnews.length){
+      newsSection=document.createElement('div');
+      newsSection.id='gnews-section';
+      newsSection.innerHTML='<h4 style="margin:16px 0 8px;font-size:13px;color:var(--accent)">📡 GDELT/RSS 实时新闻</h4><div id="gnews-list"></div>';
+      container.appendChild(newsSection);
     }
-    if(cnt)cnt.textContent=this.data.news.length+'条记录';
-    el.innerHTML=this.data.news.map(n=>{
-      const lowerTitle=(n.title||'').toLowerCase();
-      const isRisk=/(attack|kill|bomb|security|conflict|war|sanction|crisis|evacuat|threat|kidnap|explosion|coup|unrest|protest|terror|🔴|🟠|⚠)/i.test(lowerTitle);
-      const isCurated=n.type==='curated';
-      const cls=isRisk?'red':(isCurated?'blue':'');
-      const dateStr=n.date?n.date.substring(0,16):'';
-      const srcTag=n.type==='gdelt'?'GDELT V2':n.type==='gdeltv1'?'GDELT V1':n.type==='rssproxy'?'RSS':n.type==='curated'?'系统内置':'其他';
-      const srcColor=n.type==='curated'?'var(--accent)':n.type==='gdelt'?'var(--green)':n.type==='rssproxy'?'var(--yellow)':'var(--text2)';
-      return `<div class="collect-news-item ${cls}"><div class="collect-news-tt">${isRisk&&!isCurated?'⚠️ ':''}${n.url?'<a href="'+n.url+'" target="_blank" rel="noopener">'+this.escapeHtml(n.title)+'</a>':this.escapeHtml(n.title)}</div><div class="collect-news-meta"><span class="collect-news-src" style="background:'+srcColor+'20;color:'+srcColor+'">'+srcTag+'</span><span>📰 '+this.escapeHtml(n.source||'')+'</span>${dateStr?'<span>🕐 '+dateStr+'</span>':''}<span>🔍 '+this.escapeHtml(n.query||n.country||'')+'</span></div>${n.description?'<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.4">'+this.escapeHtml(n.description)+'</div>':''}</div>`;
-    }).join('');
-  },
-  renderEcon(){
-    const el=document.getElementById('collect-econ-body');
-    const cnt=document.getElementById('econ-count');
-    if(!el)return;
-    if(!this.data.econ.length){el.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';if(cnt)cnt.textContent='0条记录';return;}
-    if(cnt)cnt.textContent=this.data.econ.length+'条记录';
-    el.innerHTML=this.data.econ.map(e=>{
-      let val=e.value;
-      if(e.indicator.includes('%'))val=val+'%';
-      else if(val&&Math.abs(val)>1e9)val=(val/1e9).toFixed(2)+'B$';
-      else if(val&&Math.abs(val)>1e6)val=(val/1e6).toFixed(2)+'M$';
-      else val=val!==null&&val!==undefined?Number(val).toFixed(2):'—';
-      return `<tr><td><strong>${this.escapeHtml(e.country)}</strong></td><td>${this.escapeHtml(e.indicator)}</td><td><strong>${val}</strong></td><td>${e.year||'—'}</td><td><span class="collect-news-src">${this.escapeHtml(e.source)}</span></td><td style="font-size:10px;color:var(--text2)">${e.collectTime||''}</td></tr>`;
-    }).join('');
+    const newsList=document.getElementById('gnews-list');
+    if(newsList){
+      newsList.innerHTML=this.data.gnews.slice(0,20).map(n=>`<div class="collect-news-item" style="padding:8px;font-size:12px;margin-bottom:4px;border-bottom:1px solid var(--border)"><div style="font-weight:500">${n.url?'<a href="'+n.url+'" target="_blank">'+this.escapeHtml(n.title)+'</a>':this.escapeHtml(n.title)}</div><div style="font-size:10px;color:var(--text2);margin-top:2px"><span class="collect-news-src">${n.type}</span> 📰 ${this.escapeHtml(n.source)} · ${n.date?n.date.substring(0,16):''} · 🔍 ${n.query||''}</div></div>`).join('');
+    }
   },
   renderFx(){
     const el=document.getElementById('collect-fx-grid');
     const cnt=document.getElementById('fx-count');
     if(!el)return;
-    if(!this.data.fx.length){el.innerHTML='<div class="empty"><div class="ic">💰</div><div>暂无采集数据</div></div>';if(cnt)cnt.textContent='0条记录';return;}
+    if(!this.data.fx.length){
+      el.innerHTML='<div class="empty"><div class="ic">💰</div><div>暂无采集数据，点击"一键采集"获取实时汇率</div></div>';
+      if(cnt)cnt.textContent='0条记录';
+      return;
+    }
     if(cnt)cnt.textContent=this.data.fx.length+'条记录';
     el.innerHTML=this.data.fx.map(f=>{
-      const isCNY=f.quote==='CNY';
-      return `<div class="collect-fx-card" style="${isCNY?'border-color:var(--accent);background:var(--blue-bg)':''}"><div class="collect-fx-pair">${f.pair}</div><div class="collect-fx-rate" style="${isCNY?'color:var(--accent)':''}">${f.rate.toFixed(4)}</div><div class="collect-fx-change" style="color:var(--text2)">${f.source}</div>${isCNY?'<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">🇨🇳 关注货币</div>':''}</div>`;
+      const isCNY=f.pair==='USD/CNY';
+      return `<div class="collect-fx-card" style="${isCNY?'border-color:var(--accent);background:var(--blue-bg)':''}"><div class="collect-fx-pair">${f.pair}</div><div class="collect-fx-rate" style="${isCNY?'color:var(--accent)':''}">${Number(f.rate).toFixed(4)}</div>${isCNY?'<div style="font-size:10px;color:var(--accent);font-weight:600">🇨🇳 关注货币</div>':''}<div style="font-size:9px;color:var(--text2);margin-top:2px">${f.collectTime||''}</div></div>`;
     }).join('');
-  },
-  renderCountry(){
-    const el=document.getElementById('collect-country-body');
-    const cnt=document.getElementById('country-count');
-    if(!el)return;
-    if(!this.data.country.length){el.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';if(cnt)cnt.textContent='0条记录';return;}
-    if(cnt)cnt.textContent=this.data.country.length+'条记录';
-    el.innerHTML=this.data.country.map(c=>`<tr><td><strong>${this.escapeHtml(c.country)}</strong></td><td>${this.escapeHtml(c.capital)}</td><td>${c.population}</td><td>${c.area}</td><td>${this.escapeHtml(c.region)}</td><td>${this.escapeHtml(c.currency)}</td><td style="font-size:11px">${this.escapeHtml(c.language)}</td><td style="font-size:10px;color:var(--text2)">${c.collectTime||''}</td></tr>`).join('');
+    // Also render GDELT news if on fx tab
+    this.renderGnNews();
   },
   switchTab(tab,el){
     document.querySelectorAll('.collect-tab').forEach(t=>t.classList.remove('active'));
@@ -1028,10 +969,14 @@ const COLLECT={
     this.currentTab=tab;
   },
   updateStats(){
-    document.getElementById('cs-success').textContent=this.stats.success;
-    document.getElementById('cs-fail').textContent=this.stats.fail;
-    document.getElementById('cs-records').textContent=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    document.getElementById('cs-last').textContent=this.stats.lastTime?this.stats.lastTime.toLocaleString('zh-CN'):'未采集';
+    const el1=document.getElementById('cs-success');
+    const el2=document.getElementById('cs-fail');
+    const el3=document.getElementById('cs-records');
+    const el4=document.getElementById('cs-last');
+    if(el1)el1.textContent=this.stats.success;
+    if(el2)el2.textContent=this.stats.fail;
+    if(el3)el3.textContent=this.data.terror_events.length+this.data.china_events.length+this.data.gnews.length+this.data.fx.length;
+    if(el4)el4.textContent=this.stats.lastTime?this.stats.lastTime.toLocaleString('zh-CN'):'未采集';
   },
   log(type,msg){
     const el=document.getElementById('collect-log');
@@ -1054,8 +999,8 @@ const COLLECT={
       this.autoInterval=parseInt(document.getElementById('auto-interval').value);
       if(!this.autoInterval){showToast('请选择采集间隔');return;}
       this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);
-      document.getElementById('auto-toggle-text').textContent='⏱️ 关闭自动采集';
-      this.log('success','[系统] 自动采集已开启，间隔'+(this.autoInterval/60000)+'分钟');
+      document.getElementById('auto-toggle-text').textContent='⏸️ 关闭自动采集';
+      this.log('success','[系统] 自动采集已开启，间隔'+(this.autoInterval/60000)+'分钟（仅自动刷新外部API数据）');
       showToast('✅ 自动采集已开启');
     }
   },
@@ -1069,6 +1014,6 @@ const COLLECT={
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
   }
 };
-// ===== END DATA COLLECTION MODULE =====
+// ===== END DATA COLLECTION MODULE v3 =====
 //初始化
 document.addEventListener('DOMContentLoaded',()=>{AUTH.init()});

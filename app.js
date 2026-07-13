@@ -565,13 +565,14 @@ function initStats(){
 //通用
 function closeModal(){document.getElementById('modal').classList.remove('show')}
 function exportData(){const data={date:new Date().toISOString(),enterprises:ENTERPRISES,countries:COUNTRIES,alerts:ALERTS,events:EVENTS,warningRules:WARNING_RULES};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`海外利益保护数据_${new Date().toISOString().split('T')[0]}.json`;a.click();URL.revokeObjectURL(url);showToast('✅ 数据已导出');}
-// ===== DATA COLLECTION MODULE =====
+// ===== DATA COLLECTION MODULE (v2 — fixed CORS + multi-source fallback) =====
 const COLLECT={
   sources:[
-    {id:'gdelt',name:'GDELT全球新闻事件',ic:'📰',desc:'从GDELT Project API采集与中国海外利益相关的全球新闻',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v2/doc/doc'},
+    {id:'gdelt',name:'GDELT全球新闻事件',ic:'📰',desc:'GDELT V2 Doc API — 搜索与中国海外利益相关的全球新闻事件',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v2/doc/doc'},
+    {id:'gdeltv1',name:'GDELT V1全文搜索',ic:'🔍',desc:'GDELT V1 FTXT — 备用新闻源，HTML解析提取',enabled:true,type:'news',api:'https://api.gdeltproject.org/api/v1/search_ftxtsearch/search_ftxtsearch'},
+    {id:'rssproxy',name:'国际RSS新闻(代理)',ic:'📡',desc:'通过CORS代理采集BBC/UN/SCMP/AlJazeera等国际媒体',enabled:true,type:'news',api:'https://api.allorigins.win/raw'},
     {id:'worldbank',name:'世界银行经济指标',ic:'📊',desc:'采集监测国家的GDP、通胀、汇率等宏观经济数据',enabled:true,type:'econ',api:'https://api.worldbank.org/v2'},
     {id:'fxrate',name:'实时汇率数据',ic:'💰',desc:'采集美元兑人民币等关键货币实时汇率',enabled:true,type:'fx',api:'https://open.er-api.com/v6/latest/USD'},
-    {id:'rss',name:'RSS新闻聚合',ic:'📡',desc:'通过RSS2JSON采集Reuters/BBC/联合国等国际媒体新闻',enabled:true,type:'news',api:'https://api.rss2json.com/v1/api.json'},
     {id:'restcountry',name:'国家基础信息',ic:'🌐',desc:'从Rest Countries API采集国家人口/面积/首都等信息',enabled:true,type:'country',api:'https://restcountries.com/v3.1'}
   ],
   data:{news:[],econ:[],fx:[],country:[]},
@@ -580,17 +581,26 @@ const COLLECT={
   autoInterval:600000,
   inited:false,
   currentTab:'news',
+  // News queries for GDELT v2
   gdeltQueries:[
-    {q:'China overseas investment',label:'中国海外投资'},
-    {q:'Chinese companies security risk',label:'中企安全风险'},
-    {q:'China Belt Road',label:'一带一路'},
-    {q:'China Sudan OR Pakistan OR Myanmar',label:'高风险国家'},
-    {q:'Chinese workers attack',label:'中方人员遇袭'}
+    {q:'China overseas investment security',label:'中国海外投资安全'},
+    {q:'Chinese companies Belt Road risk',label:'中企一带一路风险'},
+    {q:'Chinese workers attacked abroad',label:'中方海外人员遇袭'},
+    {q:'China Sudan Pakistan Myanmar conflict',label:'高风险国家涉华事件'},
+    {q:'China overseas project sanctions',label:'中国海外项目制裁'},
+    {q:'Belt and Road Initiative risk',label:'一带一路风险'}
   ],
-  rssFeeds:[
-    {url:'https://feeds.reuters.com/reuters/worldNews',name:'Reuters World News'},
-    {url:'https://feeds.bbci.co.uk/news/world/rss.xml',name:'BBC World News'},
-    {url:'https://news.un.org/feed/subscribe/en/news/all/rss.xml',name:'UN News'}
+  // News feeds via CORS proxy
+  proxyFeeds:[
+    {url:'https://feeds.bbci.co.uk/news/world/rss.xml',name:'BBC World'},
+    {url:'https://news.un.org/feed/subscribe/en/news/all/rss.xml',name:'UN News'},
+    {url:'https://www.scmp.com/rss/4/feed',name:'SCMP China'},
+    {url:'https://www.aljazeera.com/xml/rss/all.xml',name:'Al Jazeera'}
+  ],
+  // CORS proxies (tried in order)
+  corsProxies:[
+    'https://api.allorigins.win/raw?url=',
+    'https://corsproxy.io/?'
   ],
   wbIndicators:[
     {code:'NY.GDP.MKTP.CD',name:'GDP（美元）'},
@@ -601,17 +611,19 @@ const COLLECT={
     {code:'PA.NUS.FCRF',name:'官方汇率（本币/美元）'}
   ],
   countryCodes:{'中国':'CHN','阿富汗':'AFG','巴基斯坦':'PAK','哈萨克斯坦':'KAZ','俄罗斯':'RUS','苏丹':'SDN','缅甸':'MMR','伊拉克':'IRQ','委内瑞拉':'VEN','伊朗':'IRN','尼日利亚':'NGA','沙特阿拉伯':'SAU','南非':'ZAF','埃塞俄比亚':'ETH','越南':'VNM','印度尼西亚':'IDN','巴西':'BRA','美国':'USA','泰国':'THA','阿联酋':'ARE','澳大利亚':'AUS','新加坡':'SGP','土耳其':'TUR','埃及':'EGY','利比亚':'LBY','也门':'YEM','索马里':'SOM','南苏丹':'SSD','刚果(金)':'COD','哥伦比亚':'COL','墨西哥':'MEX','秘鲁':'PER','印度':'IND','菲律宾':'PHL','马来西亚':'MYS','柬埔寨':'KHM','乌兹别克斯坦':'UZB','肯尼亚':'KEN','安哥拉':'AGO','阿尔及利亚':'DZA','塞尔维亚':'SRB','乌克兰':'UKR','叙利亚':'SYR'},
+  // Track which sources succeeded/failed for UI feedback
+  sourceStatus:{},
   init(){
     if(this.inited)return;
     this.inited=true;
     this.renderSources();
-    this.log('info','[系统] 数据采集中心初始化完成，共'+this.sources.length+'个数据源就绪');
+    this.log('info','[系统] 数据采集中心初始化完成，共'+this.sources.length+'个数据源就绪（3个新闻源+3个数据源）');
     this.updateStats();
   },
   renderSources(){
     const el=document.getElementById('collect-sources');
     if(!el)return;
-    el.innerHTML=this.sources.map(s=>`<div class="src-card${s.enabled?' enabled':''}" onclick="COLLECT.toggleSource('${s.id}')"><div class="src-card-toggle${s.enabled?' on':''}" id="toggle-${s.id}"></div><div class="src-card-hd"><div class="src-card-ic">${s.ic}</div><div class="src-card-tt">${s.name}</div></div><div class="src-card-desc">${s.desc}</div><div class="src-card-meta"><span>类型：${s.type}</span><span>状态：<span style="color:${s.enabled?'var(--green)':'var(--text2)'}">${s.enabled?'已启用':'未启用'}</span></span></div></div>`).join('');
+    el.innerHTML=this.sources.map(s=>`<div class="src-card${s.enabled?' enabled':''}" onclick="COLLECT.toggleSource('${s.id}')"><div class="src-card-toggle${s.enabled?' on':''}" id="toggle-${s.id}"></div><div class="src-card-hd"><div class="src-card-ic">${s.ic}</div><div class="src-card-tt">${s.name}</div></div><div class="src-card-desc">${s.desc}</div><div class="src-card-meta"><span>类型：${s.type}</span><span>状态：<span id="status-${s.id}" style="color:${s.enabled?'var(--green)':'var(--text2)'}">${s.enabled?'就绪':'未启用'}</span></span></div></div>`).join('');
     const enabledCount=this.sources.filter(s=>s.enabled).length;
     document.getElementById('cs-sources').textContent=enabledCount;
   },
@@ -623,10 +635,28 @@ const COLLECT={
     card.classList.toggle('enabled');
     const toggle=document.getElementById('toggle-'+id);
     if(toggle)toggle.classList.toggle('on');
-    const meta=card.querySelector('.src-card-meta span:last-child span');
-    if(meta){meta.textContent=s.enabled?'已启用':'未启用';meta.style.color=s.enabled?'var(--green)':'var(--text2)'}
+    const meta=document.getElementById('status-'+id);
+    if(meta){meta.textContent=s.enabled?'就绪':'未启用';meta.style.color=s.enabled?'var(--green)':'var(--text2)'}
     document.getElementById('cs-sources').textContent=this.sources.filter(x=>x.enabled).length;
     this.log('info','['+s.name+'] '+(s.enabled?'已启用':'已停用'));
+  },
+  // Retry wrapper with exponential backoff
+  async fetchWithRetry(url,options={},maxRetries=2){
+    let lastError;
+    for(let i=0;i<=maxRetries;i++){
+      try{
+        if(i>0){
+          const delay=Math.pow(2,i)*1000;
+          await new Promise(r=>setTimeout(r,delay));
+        }
+        const resp=await fetch(url,options);
+        return resp;
+      }catch(e){
+        lastError=e;
+        if(i<maxRetries)this.log('warn','[网络] 请求失败，'+(i+1)+'秒后重试... ('+(i+1)+'/'+maxRetries+')');
+      }
+    }
+    throw lastError;
   },
   async collectAll(){
     const btn=document.getElementById('btn-collect-all');
@@ -637,28 +667,57 @@ const COLLECT={
     const progBar=document.getElementById('collect-progress-bar');
     if(prog){prog.classList.add('show')}
     this.log('info','[系统] ===== 开始采集，共'+enabledSources.length+'个数据源 =====');
+    this.sourceStatus={};
+    
+    // Collect news sources first (parallel), then data sources
     let done=0;
-    for(const s of enabledSources){
-      if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
+    const newsSources=enabledSources.filter(s=>s.type==='news');
+    const dataSources=enabledSources.filter(s=>s.type!=='news');
+    
+    // Phase 1: News collection
+    for(const s of newsSources){
+      this.setSourceStatus(s.id,'采集中...','var(--accent)');
+      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
       try{
         this.log('info','['+s.name+'] 开始采集...');
         switch(s.id){
           case 'gdelt':await this.collectGDELT();break;
+          case 'gdeltv1':await this.collectGDELTv1();break;
+          case 'rssproxy':await this.collectRSSProxy();break;
+        }
+        this.stats.success++;
+        this.setSourceStatus(s.id,'✅ 成功','var(--green)');
+      }catch(e){
+        this.stats.fail++;
+        this.setSourceStatus(s.id,'❌ 失败','var(--red)');
+        this.log('error','['+s.name+'] 采集失败：'+e.message);
+      }
+      done++;
+      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
+    }
+    
+    // Phase 2: Data sources
+    for(const s of dataSources){
+      this.setSourceStatus(s.id,'采集中...','var(--accent)');
+      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
+      try{
+        this.log('info','['+s.name+'] 开始采集...');
+        switch(s.id){
           case 'worldbank':await this.collectWorldBank();break;
           case 'fxrate':await this.collectFxRate();break;
-          case 'rss':await this.collectRSS();break;
           case 'restcountry':await this.collectRestCountries();break;
         }
         this.stats.success++;
-        done++;
-        if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
+        this.setSourceStatus(s.id,'✅ 成功','var(--green)');
       }catch(e){
         this.stats.fail++;
-        done++;
+        this.setSourceStatus(s.id,'❌ 失败','var(--red)');
         this.log('error','['+s.name+'] 采集失败：'+e.message);
-        if(progBar)progBar.style.width=((done/enabledSources.length)*100)+'%';
       }
+      done++;
+      if(progBar)progBar.style.width=Math.floor((done/enabledSources.length)*100)+'%';
     }
+    
     this.stats.lastTime=new Date();
     this.updateStats();
     this.renderResults();
@@ -666,18 +725,25 @@ const COLLECT={
     setTimeout(()=>{if(prog)prog.classList.remove('show')},2000);
     if(btn){btn.disabled=false;btn.innerHTML='🚀 一键采集全部'}
     const total=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    this.log('success','[系统] ===== 采集完成！成功'+this.stats.success+'个源，失败'+this.stats.fail+'个，共采集'+total+'条记录 =====');
-    showToast('✅ 数据采集完成，共获取'+total+'条记录');
+    this.log('success','[系统] ===== 采集完成！成功'+this.stats.success+'个源，失败'+this.stats.fail+'个，共'+total+'条记录 =====');
+    if(total>0){showToast('✅ 数据采集完成，共获取'+total+'条记录')}
+    else{showToast('⚠️ 新闻采集全部失败，请查看内置数据或稍后重试')}
     const badge=document.getElementById('sb-collect-count');
     if(badge)badge.textContent=total;
+    // Show fallback hint if no news
+    if(!this.data.news.length)this.log('warn','[提示] 新闻源均未成功，可点击「加载内置新闻」查看系统预置的涉华安全事件数据');
   },
+  setSourceStatus(id,text,color){
+    const el=document.getElementById('status-'+id);
+    if(el){el.textContent=text;el.style.color=color}
+  },
+  // ===== News Sources =====
   async collectGDELT(){
     const results=[];
     for(const query of this.gdeltQueries){
       try{
-        const url=this.sources.find(s=>s.id==='gdelt').api+'?query='+encodeURIComponent(query.q)+'&mode=ArtList&format=json&maxrecords=10&sort=DateDesc&timespan=1month';
-        this.log('info','[GDELT] 请求关键词："'+query.label+'"');
-        const resp=await fetch(url);
+        const url=this.sources.find(s=>s.id==='gdelt').api+'?query='+encodeURIComponent(query.q)+'&mode=artlist&format=json&maxrecords=8&sort=datedesc';
+        const resp=await this.fetchWithRetry(url,{},1);
         if(!resp.ok)throw new Error('HTTP '+resp.status);
         const data=await resp.json();
         if(data.articles&&data.articles.length){
@@ -688,114 +754,182 @@ const COLLECT={
               source:a.domain||'GDELT',
               date:a.seendate||'',
               language:a.language||'',
-              socialimage:a.socialimage||'',
               query:query.label,
               type:'gdelt'
             });
           });
-          this.log('success','[GDELT] "'+query.label+'" 采集到'+data.articles.length+'条新闻');
+          this.log('success','[GDELT V2] "'+query.label+'" → '+data.articles.length+'条');
         }else{
-          this.log('warn','[GDELT] "'+query.label+'" 无结果');
+          this.log('warn','[GDELT V2] "'+query.label+'" 无结果');
         }
       }catch(e){
-        this.log('error','[GDELT] 关键词"'+query.label+'"请求失败：'+e.message);
+        this.log('error','[GDELT V2] "'+query.label+'" 请求失败：'+e.message);
       }
     }
-    const existing=this.data.news.filter(n=>n.type!=='gdelt');
-    this.data.news=[...results,...existing];
+    // Merge: keep existing rssproxy news, replace gdelt
+    const otherNews=this.data.news.filter(n=>n.type!=='gdelt');
+    this.data.news=[...results,...otherNews];
+    this.updateRecordCount();
+  },
+  async collectGDELTv1(){
+    // GDELT V1 FTXT — returns HTML, parse article links
+    const results=[];
+    for(const query of [{q:'China+security+risk',label:'涉华安全风险'},{q:'Belt+Road+China+investment',label:'一带一路投资'},{q:'Chinese+workers+abroad',label:'海外中方人员'}]){
+      try{
+        const url=this.sources.find(s=>s.id==='gdeltv1').api+'?query='+encodeURIComponent(query.q)+'&maxrows=5';
+        const resp=await this.fetchWithRetry(url,{},1);
+        if(!resp.ok)throw new Error('HTTP '+resp.status);
+        const html=await resp.text();
+        // Parse article blocks from HTML
+        const parser=new DOMParser();
+        const doc=parser.parseFromString(html,'text/html');
+        const links=doc.querySelectorAll('a[href^="http"]');
+        let count=0;
+        links.forEach(a=>{
+          const href=a.getAttribute('href');
+          const text=a.textContent.trim();
+          if(href&&!href.includes('gdeltproject')&&!href.includes('google')&&text&&text.length>10){
+            results.push({
+              title:text.substring(0,150),
+              url:href,
+              source:'GDELT V1',
+              date:'',
+              query:query.label,
+              type:'gdeltv1'
+            });
+            count++;
+          }
+        });
+        this.log('success','[GDELT V1] "'+query.label+'" → '+count+'条');
+      }catch(e){
+        this.log('error','[GDELT V1] "'+query.label+'" 请求失败：'+e.message);
+      }
+    }
+    const otherNews=this.data.news.filter(n=>n.type!=='gdeltv1');
+    this.data.news=[...otherNews,...results];
+    this.updateRecordCount();
+  },
+  async collectRSSProxy(){
+    let allItems=[];
+    for(const feed of this.proxyFeeds){
+      let success=false;
+      for(const proxy of this.corsProxies){
+        try{
+          const proxyUrl=proxy+encodeURIComponent(feed.url);
+          const resp=await this.fetchWithRetry(proxyUrl,{},1);
+          if(!resp.ok)continue;
+          const text=await resp.text();
+          const parser=new DOMParser();
+          const xmlDoc=parser.parseFromString(text,'text/xml');
+          const items=xmlDoc.querySelectorAll('item');
+          if(items.length>0){
+            items.forEach(item=>{
+              const title=item.querySelector('title')?.textContent||'';
+              const link=item.querySelector('link')?.textContent||'';
+              const desc=item.querySelector('description')?.textContent||'';
+              const pubDate=item.querySelector('pubDate')?.textContent||'';
+              if(title)allItems.push({
+                title:title,
+                url:link,
+                source:feed.name,
+                date:pubDate,
+                description:(desc||'').replace(/<[^>]*>/g,'').substring(0,200),
+                query:'RSS代理',
+                type:'rssproxy'
+              });
+            });
+            this.log('success','[RSS代理] '+feed.name+' → '+items.length+'条');
+            success=true;
+            break;
+          }
+        }catch(e){}
+      }
+      if(!success)this.log('warn','[RSS代理] '+feed.name+' 所有代理均失败');
+    }
+    const otherNews=this.data.news.filter(n=>n.type!=='rssproxy');
+    this.data.news=[...otherNews,...allItems];
+    this.updateRecordCount();
+  },
+  // Load curated news from built-in ALERTS data
+  loadCuratedNews(){
+    const results=[];
+    if(typeof ALERTS!=='undefined'&&ALERTS.length){
+      ALERTS.slice(0,20).forEach(a=>{
+        const sevMap={red:'🔴',orange:'🟠',yellow:'🟡',blue:'🔵'};
+        results.push({
+          title:'['+sevMap[a.severity||'yellow']+'] '+a.title,
+          url:'',
+          source:'系统内置预警',
+          date:a.date||'',
+          country:a.country||'',
+          level:a.level||'',
+          severity:a.severity||'yellow',
+          description:a.desc||'',
+          type:'curated'
+        });
+      });
+    }
+    // Also add recent events
+    if(typeof EVENTS!=='undefined'&&EVENTS.length){
+      EVENTS.slice(0,10).forEach(e=>{
+        results.push({
+          title:'[📋事件] '+e.title,
+          url:'',
+          source:'系统内置事件',
+          date:e.date||'',
+          country:e.country||'',
+          description:e.desc||'',
+          type:'curated'
+        });
+      });
+    }
+    // Replace ALL news with curated
+    this.data.news=results;
+    this.updateRecordCount();
+    this.renderNews();
+    this.log('success','[内置数据] 已加载'+results.length+'条涉华安全事件（来自系统预警和事件库）');
+    showToast('✅ 已加载'+results.length+'条内置新闻');
+  },
+  updateRecordCount(){
     this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
   },
+  // ===== Data Sources (unchanged but with retry) =====
   async collectWorldBank(){
     const results=[];
-    const countries=COUNTRIES.slice(0,20);
     let collected=0;
     for(const countryCode of Object.values(this.countryCodes).slice(0,20)){
       const cname=Object.keys(this.countryCodes).find(k=>this.countryCodes[k]===countryCode);
       for(const ind of this.wbIndicators){
         try{
           const url=this.sources.find(s=>s.id==='worldbank').api+'/country/'+countryCode+'/indicator/'+ind.code+'?format=json&per_page=1&date=2020:2024';
-          const resp=await fetch(url);
+          const resp=await this.fetchWithRetry(url);
           if(!resp.ok)continue;
           const data=await resp.json();
           if(data&&data[1]&&data[1][0]){
             const item=data[1][0];
-            results.push({
-              country:cname,
-              indicator:ind.name,
-              value:item.value,
-              year:item.date,
-              source:'World Bank API',
-              collectTime:new Date().toLocaleString('zh-CN')
-            });
+            results.push({country:cname,indicator:ind.name,value:item.value,year:item.date,source:'World Bank API',collectTime:new Date().toLocaleString('zh-CN')});
             collected++;
           }
         }catch(e){}
       }
-      if(collected%6===0)this.log('info','[World Bank] 已采集'+collected+'条指标数据...');
+      if(collected%10===0&&collected>0)this.log('info','[World Bank] 已采集'+collected+'条...');
     }
     this.data.econ=results;
-    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    this.log('success','[World Bank] 采集完成，共'+results.length+'条经济指标数据');
+    this.updateRecordCount();
+    this.log('success','[World Bank] 完成，共'+results.length+'条经济指标');
   },
   async collectFxRate(){
-    try{
-      const url=this.sources.find(s=>s.id==='fxrate').api;
-      this.log('info','[汇率] 请求实时汇率数据...');
-      const resp=await fetch(url);
-      if(!resp.ok)throw new Error('HTTP '+resp.status);
-      const data=await resp.json();
-      if(data&&data.rates){
-        const keyCurrencies=['CNY','EUR','GBP','JPY','RUB','INR','BRL','ZAR','KRW','TRY','AED','SGD','AUD','CAD','PKR','EGP','NGN','VND','IDR','THR'];
-        this.data.fx=keyCurrencies.filter(c=>data.rates[c]).map(c=>({
-          pair:'USD/'+c,
-          rate:data.rates[c],
-          base:'USD',
-          quote:c,
-          updateTime:data.time_last_update_utc||new Date().toUTCString(),
-          source:'open.er-api.com',
-          collectTime:new Date().toLocaleString('zh-CN')
-        }));
-        this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-        this.log('success','[汇率] 采集完成，共'+this.data.fx.length+'个货币汇率（基准：USD）');
-      }
-    }catch(e){
-      this.log('error','[汇率] 采集失败：'+e.message);
-      throw e;
+    const url=this.sources.find(s=>s.id==='fxrate').api;
+    this.log('info','[汇率] 请求实时汇率...');
+    const resp=await this.fetchWithRetry(url);
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    const data=await resp.json();
+    if(data&&data.rates){
+      const keyCurrencies=['CNY','EUR','GBP','JPY','RUB','INR','BRL','ZAR','KRW','TRY','AED','SGD','AUD','CAD','PKR','EGP','NGN','VND','IDR','THB'];
+      this.data.fx=keyCurrencies.filter(c=>data.rates[c]).map(c=>({pair:'USD/'+c,rate:data.rates[c],base:'USD',quote:c,updateTime:data.time_last_update_utc||new Date().toUTCString(),source:'open.er-api.com',collectTime:new Date().toLocaleString('zh-CN')}));
+      this.updateRecordCount();
+      this.log('success','[汇率] 完成，共'+this.data.fx.length+'个货币对');
     }
-  },
-  async collectRSS(){
-    let allItems=[];
-    for(const feed of this.rssFeeds){
-      try{
-        const url=this.sources.find(s=>s.id==='rss').api+'?rss_url='+encodeURIComponent(feed.url)+'&count=8';
-        this.log('info','[RSS] 请求：'+feed.name);
-        const resp=await fetch(url);
-        if(!resp.ok)throw new Error('HTTP '+resp.status);
-        const data=await resp.json();
-        if(data&&data.items&&data.items.length){
-          data.items.forEach(item=>{
-            allItems.push({
-              title:item.title||'(无标题)',
-              url:item.link||'',
-              source:feed.name,
-              date:item.pubDate||'',
-              description:(item.description||'').replace(/<[^>]*>/g,'').substring(0,200),
-              query:'RSS订阅',
-              type:'rss'
-            });
-          });
-          this.log('success','[RSS] '+feed.name+' 采集到'+data.items.length+'条新闻');
-        }else{
-          this.log('warn','[RSS] '+feed.name+' 无结果或状态：'+(data.status||'unknown'));
-        }
-      }catch(e){
-        this.log('error','[RSS] '+feed.name+' 请求失败：'+e.message);
-      }
-    }
-    const existing=this.data.news.filter(n=>n.type==='gdelt');
-    this.data.news=[...existing,...allItems];
-    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    this.log('success','[RSS] RSS聚合采集完成，共'+allItems.length+'条新闻');
   },
   async collectRestCountries(){
     const results=[];
@@ -806,32 +940,24 @@ const COLLECT={
         try{
           const searchName=cname.replace(/\(.*\)/,'').trim();
           const url=this.sources.find(s=>s.id==='restcountry').api+'/name/'+encodeURIComponent(searchName)+'?fields=name,capital,population,area,region,subregion,currencies,languages,flag';
-          const resp=await fetch(url);
+          const resp=await this.fetchWithRetry(url);
           if(!resp.ok)continue;
           const data=await resp.json();
           if(Array.isArray(data)&&data[0]){
             const c=data[0];
             const cur=c.currencies?Object.values(c.currencies).map(x=>x.name).join(', '):'—';
             const lang=c.languages?Object.values(c.languages).join(', '):'—';
-            results.push({
-              country:cname,
-              capital:Array.isArray(c.capital)?c.capital[0]:(c.capital||'—'),
-              population:c.population?c.population.toLocaleString():'—',
-              area:c.area?c.area.toLocaleString():'—',
-              region:c.region||'—',
-              currency:cur,
-              language:lang,
-              collectTime:new Date().toLocaleString('zh-CN')
-            });
+            results.push({country:cname,capital:Array.isArray(c.capital)?c.capital[0]:(c.capital||'—'),population:c.population?c.population.toLocaleString():'—',area:c.area?c.area.toLocaleString():'—',region:c.region||'—',currency:cur,language:lang,collectTime:new Date().toLocaleString('zh-CN')});
           }
         }catch(e){}
       }
-      if(i>0)this.log('info','[Rest Countries] 已采集'+results.length+'个国家信息...');
+      if(i>0)this.log('info','[Rest Countries] 已采集'+results.length+'个国家...');
     }
     this.data.country=results;
-    this.stats.records=this.data.news.length+this.data.econ.length+this.data.fx.length+this.data.country.length;
-    this.log('success','[Rest Countries] 采集完成，共'+results.length+'个国家基础信息');
+    this.updateRecordCount();
+    this.log('success','[Rest Countries] 完成，共'+results.length+'个国家信息');
   },
+  // ===== Rendering =====
   renderResults(){
     this.renderNews();
     this.renderEcon();
@@ -843,30 +969,27 @@ const COLLECT={
     const cnt=document.getElementById('news-count');
     if(!el)return;
     if(!this.data.news.length){
-      el.innerHTML='<div class="empty"><div class="ic">📰</div><div>暂无采集数据</div></div>';
+      el.innerHTML='<div class="empty"><div class="ic">📰</div><div>暂无采集数据</div><div style="font-size:11px;color:var(--text2);margin-top:6px">尝试点击「加载内置新闻」查看系统预置数据</div></div>';
       if(cnt)cnt.textContent='0条记录';
       return;
     }
     if(cnt)cnt.textContent=this.data.news.length+'条记录';
-    const riskKeywords=['attack','kill','bomb','security','conflict','war','sanction','crisis','evacuat','threat','kidnap','explosion','coup','unrest','protest','terror'];
     el.innerHTML=this.data.news.map(n=>{
       const lowerTitle=(n.title||'').toLowerCase();
-      const isRisk=riskKeywords.some(k=>lowerTitle.includes(k));
-      const cls=isRisk?'red':(n.type==='rss'?'':'yellow');
+      const isRisk=/(attack|kill|bomb|security|conflict|war|sanction|crisis|evacuat|threat|kidnap|explosion|coup|unrest|protest|terror|🔴|🟠|⚠)/i.test(lowerTitle);
+      const isCurated=n.type==='curated';
+      const cls=isRisk?'red':(isCurated?'blue':'');
       const dateStr=n.date?n.date.substring(0,16):'';
-      const srcTag=n.type==='gdelt'?'GDELT':'RSS';
-      return `<div class="collect-news-item ${cls}"><div class="collect-news-tt">${isRisk?'⚠️ ':''}${n.url?'<a href="'+n.url+'" target="_blank">'+this.escapeHtml(n.title)+'</a>':this.escapeHtml(n.title)}</div><div class="collect-news-meta"><span class="collect-news-src">${srcTag}</span><span>📰 ${this.escapeHtml(n.source||'')}</span>${dateStr?'<span>🕐 '+dateStr+'</span>':''}<span>🔍 ${this.escapeHtml(n.query||'')}</span></div>${n.description?'<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.4">'+this.escapeHtml(n.description)+'</div>':''}</div>`;
+      const srcTag=n.type==='gdelt'?'GDELT V2':n.type==='gdeltv1'?'GDELT V1':n.type==='rssproxy'?'RSS':n.type==='curated'?'系统内置':'其他';
+      const srcColor=n.type==='curated'?'var(--accent)':n.type==='gdelt'?'var(--green)':n.type==='rssproxy'?'var(--yellow)':'var(--text2)';
+      return `<div class="collect-news-item ${cls}"><div class="collect-news-tt">${isRisk&&!isCurated?'⚠️ ':''}${n.url?'<a href="'+n.url+'" target="_blank" rel="noopener">'+this.escapeHtml(n.title)+'</a>':this.escapeHtml(n.title)}</div><div class="collect-news-meta"><span class="collect-news-src" style="background:'+srcColor+'20;color:'+srcColor+'">'+srcTag+'</span><span>📰 '+this.escapeHtml(n.source||'')+'</span>${dateStr?'<span>🕐 '+dateStr+'</span>':''}<span>🔍 '+this.escapeHtml(n.query||n.country||'')+'</span></div>${n.description?'<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.4">'+this.escapeHtml(n.description)+'</div>':''}</div>`;
     }).join('');
   },
   renderEcon(){
     const el=document.getElementById('collect-econ-body');
     const cnt=document.getElementById('econ-count');
     if(!el)return;
-    if(!this.data.econ.length){
-      el.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';
-      if(cnt)cnt.textContent='0条记录';
-      return;
-    }
+    if(!this.data.econ.length){el.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';if(cnt)cnt.textContent='0条记录';return;}
     if(cnt)cnt.textContent=this.data.econ.length+'条记录';
     el.innerHTML=this.data.econ.map(e=>{
       let val=e.value;
@@ -881,11 +1004,7 @@ const COLLECT={
     const el=document.getElementById('collect-fx-grid');
     const cnt=document.getElementById('fx-count');
     if(!el)return;
-    if(!this.data.fx.length){
-      el.innerHTML='<div class="empty"><div class="ic">💰</div><div>暂无采集数据</div></div>';
-      if(cnt)cnt.textContent='0条记录';
-      return;
-    }
+    if(!this.data.fx.length){el.innerHTML='<div class="empty"><div class="ic">💰</div><div>暂无采集数据</div></div>';if(cnt)cnt.textContent='0条记录';return;}
     if(cnt)cnt.textContent=this.data.fx.length+'条记录';
     el.innerHTML=this.data.fx.map(f=>{
       const isCNY=f.quote==='CNY';
@@ -896,11 +1015,7 @@ const COLLECT={
     const el=document.getElementById('collect-country-body');
     const cnt=document.getElementById('country-count');
     if(!el)return;
-    if(!this.data.country.length){
-      el.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';
-      if(cnt)cnt.textContent='0条记录';
-      return;
-    }
+    if(!this.data.country.length){el.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text2)">暂无采集数据</td></tr>';if(cnt)cnt.textContent='0条记录';return;}
     if(cnt)cnt.textContent=this.data.country.length+'条记录';
     el.innerHTML=this.data.country.map(c=>`<tr><td><strong>${this.escapeHtml(c.country)}</strong></td><td>${this.escapeHtml(c.capital)}</td><td>${c.population}</td><td>${c.area}</td><td>${this.escapeHtml(c.region)}</td><td>${this.escapeHtml(c.currency)}</td><td style="font-size:11px">${this.escapeHtml(c.language)}</td><td style="font-size:10px;color:var(--text2)">${c.collectTime||''}</td></tr>`).join('');
   },
@@ -934,18 +1049,10 @@ const COLLECT={
     if(el)el.innerHTML='<div class="collect-log-line info">[系统] 日志已清空</div>';
   },
   toggleAuto(){
-    if(this.autoTimer){
-      clearInterval(this.autoTimer);
-      this.autoTimer=null;
-      document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';
-      this.log('info','[系统] 自动采集已关闭');
-      showToast('自动采集已关闭');
-    }else{
+    if(this.autoTimer){clearInterval(this.autoTimer);this.autoTimer=null;document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';this.log('info','[系统] 自动采集已关闭');showToast('自动采集已关闭');}
+    else{
       this.autoInterval=parseInt(document.getElementById('auto-interval').value);
-      if(this.autoInterval===0){
-        showToast('请选择采集间隔');
-        return;
-      }
+      if(!this.autoInterval){showToast('请选择采集间隔');return;}
       this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);
       document.getElementById('auto-toggle-text').textContent='⏱️ 关闭自动采集';
       this.log('success','[系统] 自动采集已开启，间隔'+(this.autoInterval/60000)+'分钟');
@@ -954,17 +1061,8 @@ const COLLECT={
   },
   updateInterval(){
     const val=parseInt(document.getElementById('auto-interval').value);
-    if(val===0&&this.autoTimer){
-      clearInterval(this.autoTimer);
-      this.autoTimer=null;
-      document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';
-      this.log('info','[系统] 自动采集已关闭');
-    }else if(this.autoTimer){
-      clearInterval(this.autoTimer);
-      this.autoInterval=val;
-      this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);
-      this.log('info','[系统] 采集间隔已更新为'+(this.autoInterval/60000)+'分钟');
-    }
+    if(!val&&this.autoTimer){clearInterval(this.autoTimer);this.autoTimer=null;document.getElementById('auto-toggle-text').textContent='⏱️ 开启自动采集';this.log('info','[系统] 自动采集已关闭');}
+    else if(this.autoTimer){clearInterval(this.autoTimer);this.autoInterval=val;this.autoTimer=setInterval(()=>this.collectAll(),this.autoInterval);this.log('info','[系统] 间隔已更新为'+(this.autoInterval/60000)+'分钟');}
   },
   escapeHtml(s){
     if(!s)return'';

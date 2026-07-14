@@ -375,11 +375,48 @@ CHINA_SECURITY.push.apply(CHINA_SECURITY,NEW_CHINA_SEC);
 // ===== DATABASE CENTER — Pure localStorage, all sync =====
 const DBCenter={
   _prefix:'orps_',
+  _listeners:[],
+  onChange:function(cb){this._listeners.push(cb);},
+  _fire:function(collection,action){
+    for(var i=0;i<this._listeners.length;i++){
+      try{this._listeners[i](collection,action);}catch(e){console.warn('DBCenter listener error:',e);}
+    }
+  },
   init(){
-    ['terror_events','security_events','economic_data','news_articles','political_events','military_conflicts','natural_disasters','public_health','diplomatic_events','sanctions_data','social_unrest','infrastructure','collect_logs'].forEach(function(s){
+    // === 数据库版本控制：版本不匹配时自动重建 ===
+    var DB_VERSION='20.0';
+    var storedVersion='';
+    try{storedVersion=localStorage.getItem('orps_db_version')||'';}catch(e){}
+    if(storedVersion!==DB_VERSION){
+      // 版本不匹配，清空所有旧数据，重建数据库
+      console.log('[DBCenter] 版本变更: '+storedVersion+' → '+DB_VERSION+'，重建数据库');
+      ['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel','collect_logs','economic_data','news_articles','diplomatic_events'].forEach(function(s){
+        try{localStorage.setItem('orps_'+s,'[]');}catch(e){}
+      });
+      try{localStorage.setItem('orps_db_version',DB_VERSION);}catch(e){}
+    }
+    // 11类情报数据 + 日志 — 匹配"海外利益安全风险监测情报预警平台"定位
+    ['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel','collect_logs'].forEach(function(s){
       try{if(localStorage.getItem('orps_'+s)===null)localStorage.setItem('orps_'+s,'[]');}catch(e){}
     });
-    // Seed data if empty
+    // 兼容旧数据：economic_data/news_articles/diplomatic_events 不再作为独立分类，合并到地缘情报
+    'economic_data,news_articles,diplomatic_events'.split(',').forEach(function(k){
+      if(localStorage.getItem('orps_'+k)===null)localStorage.setItem('orps_'+k,'[]');
+    });
+    // === 迁移：确保所有已有数据都有 audit_status 字段 ===
+    ['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel'].forEach(function(s){
+      var data=DBCenter._r(s);
+      var changed=false;
+      for(var i=0;i<data.length;i++){
+        if(!data[i].audit_status){
+          data[i].audit_status='pending';
+          data[i].audit_time='';
+          changed=true;
+        }
+      }
+      if(changed)DBCenter._w(s,data);
+    });
+    // Seed data if empty — 种子数据也标记为待审核
     if(this.count('terror_events')===0&&typeof TERROR_EVENTS!=='undefined'){
       this.addBatch('terror_events',TERROR_EVENTS.map(function(e){var o={};for(var k in e)o[k]=e[k];o.data_type='terror';return o;}));
     }
@@ -393,25 +430,65 @@ const DBCenter={
     if(!o)return null;
     o.collect_time=o.collect_time||new Date().toISOString();
     o.id=Date.now()+Math.floor(Math.random()*100000);
+    o.audit_status=o.audit_status||'pending'; // 默认待审核
+    if(o.audit_status==='approved'&&!o.audit_time)o.audit_time=new Date().toISOString();
+    else if(!o.audit_time)o.audit_time='';
     var a=this._r(s);a.push(o);this._w(s,a);
     return o.id;
   },
   addBatch(s,arr){
     if(!arr||!arr.length)return 0;
     var a=this._r(s);
-    arr.forEach(function(o){o.collect_time=o.collect_time||new Date().toISOString();o.id=Date.now()+Math.floor(Math.random()*100000);a.push(o);});
+    arr.forEach(function(o){o.collect_time=o.collect_time||new Date().toISOString();o.id=Date.now()+Math.floor(Math.random()*100000);o.audit_status=o.audit_status||'pending';o.audit_time='';a.push(o);});
     this._w(s,a);
     return arr.length;
+  },
+  // 获取审核统计
+  getAuditSummary:function(collection){
+    var data=this.getAll(collection);
+    var p=0,a=0,r=0;
+    data.forEach(function(d){
+      var s=d.audit_status||'pending'; // 无审核状态的数据一律视为待审核
+      if(s==='pending')p++;else if(s==='rejected')r++;else a++;
+    });
+    return {pending:p,approved:a,rejected:r,total:data.length};
+  },
+  // 更新一条记录的审核状态
+  setAuditStatus:function(collection,id,status){
+    var data=this.getAll(collection);
+    for(var i=0;i<data.length;i++){
+      if(data[i].id===id){
+        data[i].audit_status=status;
+        data[i].audit_time=new Date().toISOString();
+        this._w(collection,data);
+        return true;
+      }
+    }
+    return false;
+  },
+  // 批量更新审核状态
+  batchSetAuditStatus:function(collection,ids,status){
+    if(!ids||!ids.length)return 0;
+    var data=this.getAll(collection);
+    var count=0;
+    for(var i=0;i<data.length;i++){
+      if(ids.indexOf(data[i].id)>=0){
+        data[i].audit_status=status;
+        data[i].audit_time=new Date().toISOString();
+        count++;
+      }
+    }
+    if(count>0)this._w(collection,data);
+    return count;
   },
   getAll(s){return this._r(s);},
   count(s){return this._r(s).length;},
   clear(s){this._w(s,[]);},
-  deleteAll(){if(!PERM.guard('\u6e05\u7a7a\u6240\u6709\u6570\u636e'))return;['terror_events','security_events','economic_data','news_articles','political_events','military_conflicts','natural_disasters','public_health','diplomatic_events','sanctions_data','social_unrest','infrastructure','collect_logs'].forEach(function(s){try{localStorage.setItem('orps_'+s,'[]');}catch(e){}});},
+  deleteAll(){if(!PERM.guard('\u6e05\u7a7a\u6240\u6709\u6570\u636e'))return;['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel','collect_logs','economic_data','news_articles','diplomatic_events'].forEach(function(s){try{localStorage.setItem('orps_'+s,'[]');}catch(e){}});try{localStorage.removeItem('orps_db_version');}catch(e){}},
   getStats(){
+    var cols=['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel','collect_logs'];
     var stats={};
-    ['terror_events','security_events','economic_data','news_articles','political_events','military_conflicts','natural_disasters','public_health','diplomatic_events','sanctions_data','social_unrest','infrastructure','collect_logs'].forEach(function(s){
-      stats[s]=DBCenter.count(s);
-    });
+    cols.forEach(function(s){stats[s]=DBCenter.count(s);});
     stats.total=Object.values(stats).reduce(function(a,b){return a+b;},0);
     return stats;
   },
@@ -444,19 +521,63 @@ var DATACENTER={
   page:1,
   pageSize:15,
   search:'',
+  sortKey:'',
+  sortDir:'asc',
+  filterCountry:'',
+  filterType:'',
+  filterLevel:'',
+  dateFrom:'',
+  dateTo:'',
+  // 中文字段名映射
+  COL_LABELS:{
+    id:'记录ID',date:'日期',time:'时间',country:'国家',city:'城市',location:'地点',
+    group:'组织/团体',type:'类型',target:'目标/对象',title:'标题',desc:'描述',detail:'详情',
+    summary:'摘要',source:'来源',data_type:'数据类型',collect_time:'采集时间',
+    deaths:'死亡人数',injured:'受伤人数',severity:'严重程度',impact:'影响等级',
+    intensity:'强度',status:'状态',event_type:'事件类型',conflict_type:'冲突类型',
+    disaster_type:'灾害类型',health_type:'公共卫生类型',sanction_type:'制裁类型',
+    unrest_type:'动荡类型',infra_type:'设施类型',indicator:'指标',value:'数值',
+    change:'变化',magnitude:'强度/规模',casualties:'伤亡情况',cases:'感染/影响人数',
+    participants:'参与人数',parties:'参与方',target_country:'被制裁方',
+    affected_industry:'受影响行业',people:'涉中方人员',severity_level:'严重等级',
+    risk_level:'风险等级',submitter:'提交人',submitTime:'提交时间',
+    audit_status:'审核状态',audit_time:'审核时间'
+  },
+  _labelOf:function(k){
+    return this.COL_LABELS[k]||k;
+  },
+  // 审核相关状态
+  _selectedRows:new Set(), // 当前页勾选的行ID集合
+  _selectAll:false,
+  // 审核状态的中文标签和颜色
+  AUDIT_LABELS:{pending:'🟡 待审核',approved:'🟢 已审核',rejected:'🔴 已驳回'},
+  AUDIT_COLORS:{pending:'var(--orange)',approved:'var(--green)',rejected:'var(--red)'},
   tabs:[
-    {key:'terror_events',label:'💥 恐袭事件'},
-    {key:'security_events',label:'🛡️ 涉华安全'},
-    {key:'economic_data',label:'📉 经济数据'},
-    {key:'news_articles',label:'📰 新闻资讯'},
-    {key:'collect_logs',label:'📝 采集日志'}
+    {key:'terror_events',label:'💥 恐袭事件',ic:'💥',bg:'var(--red-bg)',c:'var(--red)'},
+    {key:'security_events',label:'🛡️ 涉华安全',ic:'🛡️',bg:'var(--orange-bg)',c:'var(--orange)'},
+    {key:'military_conflicts',label:'⚔️ 武装冲突',ic:'⚔️',bg:'var(--red-bg)',c:'var(--red)'},
+    {key:'political_events',label:'🏛️ 政治风险',ic:'🏛️',bg:'var(--orange-bg)',c:'var(--orange)'},
+    {key:'natural_disasters',label:'🌊 自然灾害',ic:'🌊',bg:'var(--blue-bg)',c:'var(--cyan)'},
+    {key:'public_health',label:'🧧 公共卫生',ic:'🧧',bg:'var(--green-bg)',c:'var(--green)'},
+    {key:'sanctions_data',label:'🚫 制裁合规',ic:'🚫',bg:'var(--yellow-bg)',c:'var(--yellow)'},
+    {key:'social_unrest',label:'💬 社会动荡',ic:'💬',bg:'var(--orange-bg)',c:'var(--orange)'},
+    {key:'infrastructure',label:'🚧 基础设施',ic:'🚧',bg:'var(--blue-bg)',c:'var(--cyan)'},
+    {key:'geopolitical_intel',label:'🌐 地缘情报',ic:'🌐',bg:'var(--purple-bg)',c:'#c084fc'},
+    {key:'osint_intel',label:'🔍 开源情报',ic:'🔍',bg:'var(--blue-bg)',c:'var(--cyan)'},
+    {key:'collect_logs',label:'📝 采集日志',ic:'📝',bg:'var(--green-bg)',c:'var(--green)'}
   ],
   init(){
     DBCenter.init();
+    if(typeof ENTERPRISE_DB!=='undefined'){try{ENTERPRISE_DB.init();}catch(e){}}
+    if(typeof RISK_FUSION!=='undefined'){try{RISK_FUSION.init();}catch(e){}}
     this.renderStats();
     this.renderTabs();
     this.renderTable();
-    this.renderCollectConfig();
+    this.renderScraperPanel();
+    this.renderEnterprisePanel();
+    this.renderFusionPanel();
+    this.renderCollectedPanel();
+    this._renderManualForm();
     this.renderLog();
     this.updateBadge();
   },
@@ -469,14 +590,21 @@ var DATACENTER={
     var stats=DBCenter.getStats();
     var el=document.getElementById('dc-stats');
     if(!el)return;
-    el.innerHTML=[
+    var cards=[
       {ic:'💥',bg:'var(--red-bg)',c:'var(--red)',l:'恐袭事件',v:stats.terror_events},
       {ic:'🛡️',bg:'var(--orange-bg)',c:'var(--orange)',l:'涉华安全',v:stats.security_events},
-      {ic:'📉',bg:'var(--yellow-bg)',c:'var(--yellow)',l:'经济数据',v:stats.economic_data},
-      {ic:'📰',bg:'var(--blue-bg)',c:'var(--cyan)',l:'新闻资讯',v:stats.news_articles},
-      {ic:'📝',bg:'var(--green-bg)',c:'var(--green)',l:'采集日志',v:stats.collect_logs},
-      {ic:'🗄️',bg:'var(--blue-bg)',c:'var(--cyan)',l:'总记录数',v:stats.total}
-    ].map(function(s){
+      {ic:'⚔️',bg:'var(--red-bg)',c:'var(--red)',l:'武装冲突',v:stats.military_conflicts},
+      {ic:'🏛️',bg:'var(--orange-bg)',c:'var(--orange)',l:'政治风险',v:stats.political_events},
+      {ic:'🌊',bg:'var(--blue-bg)',c:'var(--cyan)',l:'自然灾害',v:stats.natural_disasters},
+      {ic:'🧧',bg:'var(--purple-bg)',c:'#c084fc',l:'公共卫生',v:stats.public_health},
+      {ic:'🚫',bg:'var(--yellow-bg)',c:'var(--yellow)',l:'制裁合规',v:stats.sanctions_data},
+      {ic:'💬',bg:'var(--orange-bg)',c:'var(--orange)',l:'社会动荡',v:stats.social_unrest},
+      {ic:'🚧',bg:'var(--blue-bg)',c:'var(--cyan)',l:'基础设施',v:stats.infrastructure},
+      {ic:'🌐',bg:'var(--purple-bg)',c:'#c084fc',l:'地缘情报',v:stats.geopolitical_intel},
+      {ic:'🔍',bg:'var(--blue-bg)',c:'var(--cyan)',l:'开源情报',v:stats.osint_intel},
+      {ic:'🗄️',bg:'var(--cyan-bg)',c:'var(--cyan)',l:'总记录数',v:stats.total}
+    ];
+    el.innerHTML=cards.map(function(s){
       return '<div class="stat-card"><div class="stat-ic" style="background:'+s.bg+';color:'+s.c+'">'+s.ic+'</div><div class="stat-info"><div class="stat-label">'+s.l+'</div><div class="stat-val" style="color:'+s.c+'">'+s.v+'</div></div></div>';
     }).join('');
   },
@@ -490,57 +618,361 @@ var DATACENTER={
   },
   switchTab(t){
     this.currentTab=t;this.page=1;this.search='';
+    this.sortKey='';this.sortDir='asc';
+    this.filterCountry='';this.filterType='';this.filterLevel='';
+    this.dateFrom='';this.dateTo='';
     var si=document.getElementById('dc-search');if(si)si.value='';
     this.renderTabs();this.renderTable();
   },
-  renderTable(){
-    var data=DBCenter.getAll(this.currentTab);
+  // 应用筛选
+  _applyFilters(data){
+    var me=this;
     var s=this.search.toLowerCase();
     if(s){
+      data=data.filter(function(row){return JSON.stringify(row).toLowerCase().includes(s);});
+    }
+    if(this.filterCountry){
+      data=data.filter(function(row){return row.country&&row.country.indexOf(me.filterCountry)>=0;});
+    }
+    if(this.filterType){
+      data=data.filter(function(row){return (row.type||row.event_type||row.conflict_type||row.disaster_type||row.health_type||row.sanction_type||row.unrest_type||row.infra_type||'')===me.filterType;});
+    }
+    if(this.filterLevel){
+      data=data.filter(function(row){return (row.severity||row.impact||row.intensity||'')===me.filterLevel;});
+    }
+    if(this.dateFrom){
       data=data.filter(function(row){
-        return JSON.stringify(row).toLowerCase().includes(s);
+        var d=row.date||row.collect_time||'';
+        return String(d)>=me.dateFrom;
       });
     }
-    var totalPages=Math.max(1,Math.ceil(data.length/this.pageSize));
+    if(this.dateTo){
+      data=data.filter(function(row){
+        var d=row.date||row.collect_time||'';
+        return String(d)<=me.dateTo;
+      });
+    }
+    if(this.sortKey){
+      data.sort(function(a,b){
+        var va=a[me.sortKey]||'',vb=b[me.sortKey]||'';
+        var cmp=String(va).localeCompare(String(vb),'zh-CN');
+        return me.sortDir==='desc'?-cmp:cmp;
+      });
+    }
+    return data;
+  },
+  // 排序
+  toggleSort(k){
+    if(this.sortKey===k){this.sortDir=this.sortDir==='asc'?'desc':'asc';}
+    else{this.sortKey=k;this.sortDir='asc';}
+    this.renderTable();
+  },
+  // 获取当前表可用筛选选项
+  _getFilterOptions(data){
+    var countries=new Set();var types=new Set();var levels=new Set();
+    data.forEach(function(r){
+      if(r.country)countries.add(r.country);
+      var t=r.type||r.event_type||r.conflict_type||r.disaster_type||r.health_type||r.sanction_type||r.unrest_type||r.infra_type||r.intel_type;
+      if(t)types.add(t);
+      var l=r.severity||r.impact||r.intensity||r.risk_level;
+      if(l)levels.add(l);
+    });
+    return {
+      countries:Array.from(countries).sort(function(a,b){return a.localeCompare(b,'zh-CN');}),
+      types:Array.from(types).sort(function(a,b){return a.localeCompare(b,'zh-CN');}),
+      levels:Array.from(levels).sort()
+    };
+  },
+  renderTable(){
+    var allData=DBCenter.getAll(this.currentTab);
+    var filtered=this._applyFilters(allData.slice());
+    var totalPages=Math.max(1,Math.ceil(filtered.length/this.pageSize));
     if(this.page>totalPages)this.page=totalPages;
     var start=(this.page-1)*this.pageSize;
-    var pageData=data.slice(start,start+this.pageSize);
-    // Render head
+    var pageData=filtered.slice(start,start+this.pageSize);
+    var isAdmin=PERM.isAdmin();
+    var isLogs=(this.currentTab==='collect_logs');
+
+    // ---- 审核统计栏 ----
+    var auditBar=document.getElementById('dc-audit-bar');
+    if(auditBar&&isAdmin&&!isLogs){
+      var summary=DBCenter.getAuditSummary(this.currentTab);
+      var syncApprovedCount=0;
+      var collectionsSynced=0;
+      ['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel'].forEach(function(k){
+        var s=DBCenter.getAuditSummary(k);
+        if(s.approved>0){syncApprovedCount+=s.approved;collectionsSynced++;}
+      });
+      auditBar.style.display='block';
+      auditBar.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;background:rgba(0,212,255,0.05);border-radius:8px;margin-bottom:10px">'+
+        '<span style="font-size:11px;color:var(--text3);font-weight:600">📋 审核操作</span>'+
+        '<span style="font-size:10px;color:var(--orange)">🟡 待审核:<b>'+summary.pending+'</b></span>'+
+        '<span style="font-size:10px;color:var(--green)">🟢 已审核:<b>'+summary.approved+'</b></span>'+
+        '<span style="font-size:10px;color:var(--red)">🔴 驳回:<b>'+summary.rejected+'</b></span>'+
+        '<span style="margin-left:8px;font-size:11px;color:var(--text2)">已选:<b id="dc-selected-count" style="color:var(--cyan)">0</b></span>'+
+        '<button class="btn sm" onclick="DATACENTER.toggleSelectAll()" style="font-size:10px;padding:2px 8px" title="勾选/取消当前页所有数据">☐ 全选当前页</button>'+
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--cyan);color:#fff;font-weight:700" onclick="DATACENTER.approveAllPending()" title="直接审批通过当前分类下的所有待审核数据（跨页）">⚡ 一键全部审批</button>'+
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--green);color:#fff" onclick="DATACENTER.batchApprove()">✅ 批量通过</button>'+
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--red);color:#fff" onclick="DATACENTER.batchReject()">❌ 批量驳回</button>'+
+        '<button class="btn primary" style="font-size:11px;padding:4px 14px;margin-left:auto;font-weight:700" onclick="DATACENTER.syncApprovedToModules()" title="将所有已审核数据同步到态势总览和监测中心">🚀 一键同步到态势感知 ('+syncApprovedCount+'条已审核)</button>'+
+        '</div>';
+    }else if(auditBar){
+      auditBar.style.display='none';
+    }
+
+    // Filter bar
+    var filtEl=document.getElementById('dc-filters');
+    if(filtEl){
+      var opts=this._getFilterOptions(allData);
+      var me=this;
+      var cntHtml='',typeHtml='',lvlHtml='';
+      if(opts.countries.length){
+        cntHtml='<select class="select" id="dc-flt-country" style="font-size:10px;max-width:130px" onchange="DATACENTER.filterCountry=this.value;DATACENTER.page=1;DATACENTER.renderTable()"><option value="">🌍 全部国家('+opts.countries.length+')</option>'+opts.countries.map(function(c){return '<option value="'+c+'"'+(me.filterCountry===c?' selected':'')+'>'+c+'</option>';}).join('')+'</select>';
+      }
+      if(opts.types.length){
+        typeHtml='<select class="select" id="dc-flt-type" style="font-size:10px;max-width:130px" onchange="DATACENTER.filterType=this.value;DATACENTER.page=1;DATACENTER.renderTable()"><option value="">📋 全部类型('+opts.types.length+')</option>'+opts.types.map(function(t){return '<option value="'+t+'"'+(me.filterType===t?' selected':'')+'>'+t+'</option>';}).join('')+'</select>';
+      }
+      if(opts.levels.length){
+        var lvLabels={red:'🔴 红色',orange:'🟠 橙色',yellow:'🟡 黄色',critical:'🔴 严重',high:'🟠 高',medium:'🟡 中',low:'🟢 低'};
+        lvlHtml='<select class="select" id="dc-flt-level" style="font-size:10px;max-width:120px" onchange="DATACENTER.filterLevel=this.value;DATACENTER.page=1;DATACENTER.renderTable()"><option value="">⚡ 全部级别('+opts.levels.length+')</option>'+opts.levels.map(function(l){return '<option value="'+l+'"'+(me.filterLevel===l?' selected':'')+'>'+(lvLabels[l]||l)+'</option>';}).join('')+'</select>';
+      }
+      filtEl.innerHTML='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
+        cntHtml+typeHtml+lvlHtml+
+        '<input class="input" id="dc-flt-datefrom" type="date" style="font-size:10px;width:120px" value="'+this.dateFrom+'" onchange="DATACENTER.dateFrom=this.value;DATACENTER.page=1;DATACENTER.renderTable()" placeholder="起始日期" title="起始日期">'+
+        '<span style="font-size:10px;color:var(--text3)">至</span>'+
+        '<input class="input" id="dc-flt-dateto" type="date" style="font-size:10px;width:120px" value="'+this.dateTo+'" onchange="DATACENTER.dateTo=this.value;DATACENTER.page=1;DATACENTER.renderTable()" placeholder="截止日期" title="截止日期">'+
+        (this.filterCountry||this.filterType||this.filterLevel||this.dateFrom||this.dateTo?'<button class="btn sm" style="font-size:10px;padding:2px 8px" onclick="DATACENTER.filterCountry=\'\';DATACENTER.filterType=\'\';DATACENTER.filterLevel=\'\';DATACENTER.dateFrom=\'\';DATACENTER.dateTo=\'\';DATACENTER.page=1;DATACENTER.renderTable()">✕ 清除筛选</button>':'')+
+        '<span style="margin-left:auto;font-size:11px;color:var(--text2)">共 <b style="color:var(--cyan)">'+filtered.length+'</b> 条 (总计'+allData.length+'条)</span>'+
+        '</div>';
+    }
+
+    // ---- Build display keys (hide audit_time, show audit_status) ----
+    var displayKeys=[];
+    if(pageData.length>0){
+      var pk=Object.keys(pageData[0]);
+      var prio=['audit_status','date','time','country','city','location','group','type','title','desc','summary','deaths','injured','severity','impact','intensity','status','source','collect_time'];
+      // 过滤掉不想显示的字段
+      displayKeys=pk.filter(function(k){return k!=='audit_time';});
+      displayKeys.sort(function(a,b){
+        var ai=prio.indexOf(a),bi=prio.indexOf(b);
+        if(ai>=0&&bi>=0)return ai-bi;
+        if(ai>=0)return -1;if(bi>=0)return 1;
+        return a.localeCompare(b);
+      });
+    }
+
+    // ---- Table header ----
     var thead=document.getElementById('dc-thead');
     if(thead){
-      var keys=pageData.length?Object.keys(pageData[0]):['无数据'];
-      thead.innerHTML='<tr>'+keys.map(function(k){return '<th>'+k+'</th>';}).join('')+'</tr>';
+      var colValues={};
+      displayKeys.forEach(function(k){colValues[k]=new Set();});
+      allData.forEach(function(row){
+        displayKeys.forEach(function(k){
+          var v=row[k];
+          if(v!==null&&v!==undefined&&String(v).trim()){
+            var sv=String(v).trim();
+            if(sv.length<=40)colValues[k].add(sv);
+          }
+        });
+      });
+      var me=this;
+      thead.innerHTML='<tr>'+
+        (isAdmin&&!isLogs?'<th style="width:30px;text-align:center;font-size:11px"><input type="checkbox" id="dc-check-all" onchange="DATACENTER._selectAll=this.checked;DATACENTER.renderTable()" style="cursor:pointer" '+(this._selectAll?'checked':'')+'></th>':'')+
+        displayKeys.map(function(k){
+          var sortIcon='';
+          if(me.sortKey===k){sortIcon=me.sortDir==='asc'?' ▲':' ▼';}
+          var vals=Array.from(colValues[k]).sort(function(a,b){return a.localeCompare(b,'zh-CN');}).slice(0,20);
+          var ddHtml='';
+          if(vals.length>0&&k!=='collect_time'&&k!=='id'&&k!=='audit_time'){
+            ddHtml='<span class="th-dd" style="position:relative;display:inline-block;margin-left:2px" id="thdd-'+k.replace(/[^a-zA-Z0-9_]/g,'_')+'">'+
+              '<span style="cursor:pointer;font-size:9px;color:var(--text3);padding:1px 3px" onclick="event.stopPropagation();DATACENTER._toggleColDropdown(\''+k.replace(/'/g,"\\'")+'\','+JSON.stringify(vals).replace(/'/g,"&#39;")+')" title="筛选此列">▼</span></span>';
+          }
+          return '<th style="cursor:pointer;white-space:nowrap;font-size:11px;user-select:none;position:relative" onclick="DATACENTER.toggleSort(\''+k.replace(/'/g,"\\'")+'\')" title="点击排序 | ▼筛选">'+me._labelOf(k)+sortIcon+ddHtml+'</th>';
+        }).join('')+
+        (isAdmin&&!isLogs?'<th style="width:100px;text-align:center;font-size:11px">操作</th>':'')+
+        '</tr>';
     }
-    // Render body
+
+    // ---- Table body with audit badges and checkboxes ----
     var tbody=document.getElementById('dc-tbody');
     if(tbody){
       if(!pageData.length){
-        tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text3)">暂无数据</td></tr>';
+        var colSpan=(isAdmin&&!isLogs?displayKeys.length+2:displayKeys.length+0)||10;
+        tbody.innerHTML='<tr><td colspan="'+colSpan+'" style="text-align:center;padding:40px;color:var(--text3)"><div style="font-size:32px;margin-bottom:8px">📭</div>暂无符合条件的数据</td></tr>';
+        this._selectedRows.clear();
+        var countEl=document.getElementById('dc-selected-count');
+        if(countEl)countEl.textContent='0';
       }else{
-        var keys=Object.keys(pageData[0]);
+        var me=this;
+        // 如果全选，把当页所有ID加入_selectedRows
+        if(this._selectAll){
+          pageData.forEach(function(row){if(row.id)me._selectedRows.add(String(row.id));});
+        }else{
+          // 不清除，但只保留当页中存在的
+          var pageIds=new Set();
+          pageData.forEach(function(row){if(row.id)pageIds.add(String(row.id));});
+        }
         tbody.innerHTML=pageData.map(function(row,idx){
-          return '<tr style="cursor:pointer;transition:.2s" onclick="DATACENTER.showRowDetail('+(start+idx)+')" onmouseover="this.style.background=\'rgba(0,212,255,0.04)\'" onmouseout="this.style.background=\'\'">'+keys.map(function(k){
+          var actualIdx=start+idx;
+          var rowId=String(row.id||'');
+          var checked=me._selectedRows.has(rowId);
+
+          // 审核状态badge
+          var as=row.audit_status||'approved'; // 旧数据视为已审核
+          var asLabel=me.AUDIT_LABELS[as]||as;
+          var asColor=me.AUDIT_COLORS[as]||'var(--text3)';
+
+          // checkbox column
+          var cbTd='';
+          if(isAdmin&&!isLogs){
+            cbTd='<td style="text-align:center;padding:4px"><input type="checkbox" '+(checked?'checked':'')+' onclick="event.stopPropagation();DATACENTER._cbToggle(this,\''+rowId+'\')" style="cursor:pointer"></td>';
+          }
+
+          // Data cells
+          var cells=displayKeys.map(function(k){
             var v=row[k];
             if(v===null||v===undefined)v='';
+            // audit_status → colored badge
+            if(k==='audit_status'){
+              return '<td style="text-align:center;font-size:10px;color:'+asColor+';font-weight:700">'+asLabel+'</td>';
+            }
             v=String(v);
+            var style='font-size:11px';
+            if((k==='severity'||k==='impact'||k=='intensity')&&v){
+              var clr=v==='red'||v==='critical'?'var(--red)':v==='orange'||v==='high'?'var(--orange)':v==='yellow'||v=='medium'?'var(--yellow)':'var(--green)';
+              style+=';color:'+clr+';font-weight:700';
+            }
             if(v.length>60)v=v.substring(0,60)+'...';
-            return '<td style="font-size:11px">'+v+'</td>';
-          }).join('')+'</tr>';
+            return '<td style="'+style+'">'+v+'</td>';
+          }).join('');
+
+          // Action buttons (admin)
+          var actionTd='';
+          if(isAdmin&&!isLogs){
+            var isPending=(as==='pending');
+            actionTd='<td style="text-align:center;white-space:nowrap;padding:2px">'+
+              (isPending?'<button class="btn" style="font-size:9px;padding:2px 4px;background:var(--green);color:#fff" onclick="event.stopPropagation();DATACENTER.approveRow(\''+rowId+'\')" title="通过审核">✓</button> ':'')+
+              (isPending?'<button class="btn" style="font-size:9px;padding:2px 4px;background:var(--red);color:#fff" onclick="event.stopPropagation();DATACENTER.rejectRow(\''+rowId+'\')" title="驳回">✕</button> ':'')+
+              '<button class="btn danger sm" style="font-size:9px;padding:2px 4px" onclick="event.stopPropagation();DATACENTER.deleteRowById('+actualIdx+')" title="删除">🗑️</button>'+
+              '</td>';
+          }
+
+          return '<tr style="cursor:pointer;transition:.15s" onclick="DATACENTER.showRowDetailById('+actualIdx+')" onmouseover="this.style.background=\'rgba(0,212,255,0.04)\'" onmouseout="this.style.background=\'\'">'+cbTd+cells+actionTd+'</tr>';
         }).join('');
+
+        // 更新已选计数
+        var countEl=document.getElementById('dc-selected-count');
+        if(countEl)countEl.textContent=String(this._selectedRows.size);
       }
     }
+
     // Pagination
     var pag=document.getElementById('dc-pagination');
     if(pag){
-      pag.innerHTML='<span class="text-xs text-muted">共'+data.length+'条 | 第'+this.page+'/'+totalPages+'页</span>'+
+      pag.innerHTML='<span class="text-xs text-muted">第'+this.page+'/'+totalPages+'页 · 共'+filtered.length+'条</span>'+
         '<div class="flex gap-8">'+
-        '<button class="btn sm" onclick="DATACENTER.prevPage()" '+(this.page<=1?'disabled':'')+'>上一页</button>'+
-        '<button class="btn sm" onclick="DATACENTER.nextPage('+totalPages+')" '+(this.page>=totalPages?'disabled':'')+'>下一页</button>'+
+        '<button class="btn sm" onclick="DATACENTER.page=1;DATACENTER.renderTable()" '+(this.page<=1?'disabled':'')+'>首页</button>'+
+        '<button class="btn sm" onclick="DATACENTER.page--;DATACENTER.renderTable()" '+(this.page<=1?'disabled':'')+'>上一页</button>'+
+        '<button class="btn sm" onclick="DATACENTER.page++;DATACENTER.renderTable()" '+(this.page>=totalPages?'disabled':'')+'>下一页</button>'+
+        '<button class="btn sm" onclick="DATACENTER.page='+totalPages+';DATACENTER.renderTable()" '+(this.page>=totalPages?'disabled':'')+'>末页</button>'+
         '</div>';
     }
   },
   prevPage(){if(this.page>1){this.page--;this.renderTable();}},
   nextPage(tp){if(this.page<tp){this.page++;this.renderTable();}},
+  // 勾选框辅助方法
+  _cbToggle:function(cb,rowId){
+    if(cb.checked){this._selectedRows.add(rowId);}
+    else{this._selectedRows.delete(rowId);}
+    var el=document.getElementById('dc-selected-count');
+    if(el)el.textContent=String(this._selectedRows.size);
+  },
+  // ===== 审核操作方法 =====
+  approveRow(rowId){
+    if(!PERM.guard('审核数据'))return;
+    DBCenter.setAuditStatus(this.currentTab,Number(rowId),'approved');
+    DBCenter.addLog('✅ 通过审核: '+this.currentTab+' #'+rowId);
+    this.renderTable();this.renderStats();this.renderTabs();this.renderLog();
+    showToast('✅ 已通过审核，可同步到态势感知');
+  },
+  rejectRow(rowId){
+    if(!PERM.guard('审核数据'))return;
+    DBCenter.setAuditStatus(this.currentTab,Number(rowId),'rejected');
+    DBCenter.addLog('❌ 驳回: '+this.currentTab+' #'+rowId);
+    this.renderTable();this.renderStats();this.renderTabs();this.renderLog();
+    showToast('❌ 已驳回');
+  },
+  batchApprove(){
+    if(!PERM.guard('审核数据'))return;
+    var ids=Array.from(this._selectedRows).map(Number);
+    if(!ids.length){showToast('请先勾选需要审核的数据');return;}
+    var count=DBCenter.batchSetAuditStatus(this.currentTab,ids,'approved');
+    DBCenter.addLog('✅ 批量通过审核: '+count+' 条');
+    this._selectedRows.clear();this._selectAll=false;
+    this.renderTable();this.renderStats();this.renderTabs();this.renderLog();
+    showToast('✅ 已批量通过 ' + count + ' 条审核');
+  },
+  batchReject(){
+    if(!PERM.guard('审核数据'))return;
+    var ids=Array.from(this._selectedRows).map(Number);
+    if(!ids.length){showToast('请先勾选需要驳回的数据');return;}
+    var count=DBCenter.batchSetAuditStatus(this.currentTab,ids,'rejected');
+    DBCenter.addLog('❌ 批量驳回: '+count+' 条');
+    this._selectedRows.clear();this._selectAll=false;
+    this.renderTable();this.renderStats();this.renderTabs();this.renderLog();
+    showToast('❌ 已批量驳回 ' + count + ' 条');
+  },
+  toggleSelectAll(){
+    this._selectAll=!this._selectAll;
+    if(!this._selectAll)this._selectedRows.clear();
+    this.renderTable();
+  },
+  // ===== 一键全部审批：直接审批当前分类下所有待审核数据（跨页） =====
+  approveAllPending(){
+    if(!PERM.guard('审核数据'))return;
+    var allData=DBCenter.getAll(this.currentTab);
+    var pendingIds=[];
+    allData.forEach(function(d){
+      if((d.audit_status||'approved')==='pending' && d.id) pendingIds.push(d.id);
+    });
+    if(pendingIds.length===0){
+      showToast('当前分类没有待审核数据');
+      return;
+    }
+    if(!confirm('确认将当前分类下所有 '+pendingIds.length+' 条待审核数据全部通过？\n\n⚠ 此操作将一次性审批通过该分类下所有待审核数据，请确保数据来源可靠。')){
+      return;
+    }
+    var count=DBCenter.batchSetAuditStatus(this.currentTab,pendingIds,'approved');
+    DBCenter.addLog('⚡ 一键全部审批: '+this.currentTab+' 通过 '+count+' 条');
+    this._selectedRows.clear();this._selectAll=false;
+    this.renderTable();this.renderStats();this.renderTabs();this.renderLog();
+    showToast('⚡ 已一键审批通过 '+count+' 条数据！');
+  },
+  // ===== 核心：一键同步已审核数据到态势感知/监测中心 =====
+  syncApprovedToModules(){
+    if(!PERM.guard('同步数据'))return;
+    // 统计所有数据集中已审核的数量
+    var totalApproved=0;
+    var collections=['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel'];
+    collections.forEach(function(k){totalApproved+=DBCenter.getAuditSummary(k).approved;});
+    if(totalApproved===0){showToast('⚠ 没有已审核的数据可同步，请先在数据库浏览中审核数据');return;}
+    var confirmMsg='确认将 '+totalApproved+' 条已审核数据同步到态势总览和监测中心？\n\n⚠ 请确保数据来源可靠、内容真实，已审核的数据将立即在态势感知和监测中心显示。';
+    if(!confirm(confirmMsg))return;
+    var syncCount=DataHub.syncFromDBCenter();
+    DBCenter.addLog('🚀 手动同步: '+syncCount+' 条已审核数据注入态势感知/监测中心');
+    // 刷新态势总览
+    if(typeof SITUATION!=='undefined'){
+      try{SITUATION.init();}catch(e){console.warn('SITUATION refresh error:',e);}
+    }
+    // 刷新监测中心
+    if(typeof MONITOR!=='undefined'){
+      try{MONITOR.init();}catch(e){console.warn('MONITOR refresh error:',e);}
+    }
+    // 刷新滚动预警条
+    try{renderTicker();}catch(e){}
+    this.renderTable();this.renderLog();
+    showToast('🚀 已同步 '+syncCount+' 条数据到态势感知/监测中心！');
+  },
   refresh(){
     DBCenter.init();
     this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
@@ -559,53 +991,681 @@ var DATACENTER={
       showToast('所有数据已清空');
     }
   },
-  renderCollectConfig(){
-    var autoEl=document.getElementById('dc-auto-config');
-    if(autoEl){
-      autoEl.innerHTML='<div style="padding:12px;background:var(--bg2);border-radius:8px">'+
-        '<div class="flex items-center justify-between mb-8"><span class="text-sm">自动采集间隔</span><select class="select" id="dc-interval"><option value="60">每小时</option><option value="360">每6小时</option><option value="720">每12小时</option><option value="1440">每天</option></select></div>'+
-        '<div class="mb-8"><div class="text-xs text-muted mb-8">数据源 (12类)</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px">'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 💥 恐袭</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🛡️ 安全</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 📉 经济</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 📰 新闻</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🏛️ 政治</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🎖️ 军事</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🌊 灾害</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🧧 卫生</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🌐 外交</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🚫 制裁</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 💬 社会</label>'+
-        '<label class="text-xs" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" checked> 🚧 基建</label>'+
-        '</div></div>'+
-        '<button class="btn primary sm" onclick="DATACENTER.toggleAuto()">▶️ 启动自动采集</button>'+
+  // ===== 全网海外情报采集面板 v4.0 =====
+  renderScraperPanel(){
+    var el=document.getElementById('dc-scraper-panel');
+    if(!el)return;
+    var status=SCRAPER.getStatus();
+    var lastTime=status.lastCollectTime?
+      new Date(status.lastCollectTime).toLocaleString('zh-CN'):'从未采集';
+    var autoChecked=status.isAutoCollecting?'checked':'';
+    var registry=SCRAPER.getSourceRegistry();
+    var capabilities=SCRAPER.getEngineCapabilities?SCRAPER.getEngineCapabilities():null;
+    var pipeStats=SCRAPER.getPipelineStats?SCRAPER.getPipelineStats():null;
+    var hasPipeStats=pipeStats&&pipeStats.raw>0;
+
+    // 11类情报的数据源信息
+    var catIcons={
+      'terror_events':'💥','security_events':'🛡️','military_conflicts':'⚔️',
+      'political_events':'🏛️','natural_disasters':'🌊','public_health':'🧧',
+      'sanctions_data':'🚫','social_unrest':'💬','infrastructure':'🚧',
+      'geopolitical_intel':'🌐','osint_intel':'🔍'
+    };
+
+    // 构建数据源展示
+    var sourceCardsHtml='';
+    for(var cat in registry){
+      var info=registry[cat];
+      var cnNames=(info.cnSources||[]).join(' · ');
+      var intlNames=(info.intlSources||[]).join(' · ');
+      var totalSrc=info.totalSources||0;
+      sourceCardsHtml+=
+        '<div style="padding:8px 12px;background:var(--bg2);border-radius:8px;border-left:3px solid var(--cyan)">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+            '<span style="font-size:16px">'+(catIcons[cat]||'📡')+'</span>'+
+            '<div><div style="font-size:12px;color:var(--text1);font-weight:700">'+info.label+'</div>'+
+            '<div style="font-size:9px;color:var(--text3)">'+totalSrc+'个数据源</div></div>'+
+          '</div>'+
+          '<div style="font-size:9px;line-height:1.6">'+
+            '<span style="color:var(--red)">国内源(只搜海外): </span>'+
+            '<span style="color:var(--text2)">'+(cnNames||'—')+'</span><br>'+
+            '<span style="color:var(--blue)">国际源(全球风险): </span>'+
+            '<span style="color:var(--text3)">'+(intlNames||'—')+'</span>'+
+          '</div>'+
         '</div>';
     }
-    var manEl=document.getElementById('dc-manual-config');
-    if(manEl){
-      manEl.innerHTML='<div style="padding:12px;background:var(--bg2);border-radius:8px">'+
-        '<div class="text-xs text-muted mb-8">手动触发数据采集 (12类)</div>'+
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px">'+
-        '<button class="btn sm" onclick="DATACENTER.collectTerror()">💥 恐袭</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectSecurity()">🛡️ 安全</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectEconomic()">📉 经济</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectNews()">📰 新闻</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectPolitical()">🏛️ 政治</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectMilitary()">🎖️ 军事</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectDisasters()">🌊 灾害</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectHealth()">🧧 卫生</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectDiplomatic()">🌐 外交</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectSanctions()">🚫 制裁</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectSocial()">💬 社会</button>'+
-        '<button class="btn sm" onclick="DATACENTER.collectInfra()">🚧 基建</button>'+
+
+    var html='<div style="padding:16px">'+
+      // 引擎版本标识 + 4大引擎能力
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<span style="background:linear-gradient(135deg,var(--cyan),var(--blue));color:#000;padding:3px 12px;border-radius:10px;font-size:11px;font-weight:800">SCRAPER v5.0</span>'+
+        '<span style="font-size:11px;color:var(--text3)">智能采集引擎 · NLP识别 · 智能去重 · 质量评分 · 数据增强</span>'+
+      '</div>'+
+      // 4大引擎能力卡片
+      (capabilities?'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px">'+
+        '<div style="padding:8px 10px;background:rgba(220,38,38,0.08);border-radius:6px;border-left:3px solid var(--red)">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--red)">NLP识别引擎</div>'+
+          '<div style="font-size:9px;color:var(--text3);margin-top:2px">'+capabilities.countryDictSize+'国家 + '+capabilities.cityDictSize+'城市 识别</div>'+
+          '<div style="font-size:9px;color:var(--text2);margin-top:1px">事件分类 · 严重度 · 伤亡提取</div>'+
         '</div>'+
-        '<button class="btn primary sm mt-8" onclick="DATACENTER.collectAll()">🔄 一键全采</button>'+
-        '</div>';
+        '<div style="padding:8px 10px;background:rgba(8,145,178,0.08);border-radius:6px;border-left:3px solid var(--cyan)">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--cyan)">智能去重引擎</div>'+
+          '<div style="font-size:9px;color:var(--text3);margin-top:2px">Levenshtein + SimHash</div>'+
+          '<div style="font-size:9px;color:var(--text2);margin-top:1px">跨源 · 跨类 · 近似去重</div>'+
+        '</div>'+
+        '<div style="padding:8px 10px;background:rgba(245,158,11,0.08);border-radius:6px;border-left:3px solid var(--orange)">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--orange)">质量评估引擎</div>'+
+          '<div style="font-size:9px;color:var(--text3);margin-top:2px">4维加权评分 A-F分级</div>'+
+          '<div style="font-size:9px;color:var(--text2);margin-top:1px">相关性·丰富度·可信度·时效</div>'+
+        '</div>'+
+        '<div style="padding:8px 10px;background:rgba(124,58,237,0.08);border-radius:6px;border-left:3px solid var(--purple)">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--purple)">数据增强引擎</div>'+
+          '<div style="font-size:9px;color:var(--text3);margin-top:2px">自动提取结构化字段</div>'+
+          '<div style="font-size:9px;color:var(--text2);margin-top:1px">标签生成 · 企业匹配</div>'+
+        '</div>'+
+      '</div>':'')+
+      // 处理管道可视化
+      (capabilities?'<div style="display:flex;align-items:center;gap:4px;padding:8px 12px;background:var(--bg2);border-radius:8px;margin-bottom:12px;flex-wrap:wrap">'+
+        '<span style="font-size:9px;color:var(--text3);font-weight:600">管道:</span>'+
+        capabilities.pipeline.map(function(stage,i){
+          var isLast=i===capabilities.pipeline.length-1;
+          return '<span style="font-size:9px;padding:2px 8px;background:rgba(0,212,255,0.12);border-radius:8px;color:var(--cyan);font-weight:600">'+stage+'</span>'+(isLast?'':'<span style="color:var(--text3);font-size:9px">→</span>');
+        }).join('')+
+      '</div>':'')+
+      // 管道统计 (采集后显示)
+      (hasPipeStats?'<div style="padding:10px 14px;background:rgba(0,212,255,0.06);border-radius:8px;margin-bottom:12px">'+
+        '<div style="font-size:10px;color:var(--cyan);font-weight:700;margin-bottom:6px">📊 管道统计</div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px">'+
+          '<span style="color:var(--text2)">原始: <b style="color:var(--text1)">'+pipeStats.raw+'</b></span>'+
+          '<span style="color:var(--text2)">清洗后: <b style="color:var(--text1)">'+pipeStats.cleaned+'</b></span>'+
+          '<span style="color:var(--text2)">NLP增强: <b style="color:var(--purple)">'+pipeStats.enriched+'</b></span>'+
+          '<span style="color:var(--text2)">质检通过: <b style="color:var(--green)">'+pipeStats.qualified+'</b></span>'+
+          '<span style="color:var(--text2)">去重入库: <b style="color:var(--cyan)">'+pipeStats.stored+'</b></span>'+
+          '<span style="color:var(--red)">淘汰低质: <b>'+pipeStats.rejected_low+'</b></span>'+
+          '<span style="color:var(--orange)">去重淘汰: <b>'+pipeStats.rejected_dup+'</b></span>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">'+
+          '<span style="font-size:9px;color:var(--text3)">NLP识别实体:</span>'+
+          '<span style="font-size:10px;font-weight:700;color:var(--purple)">'+(pipeStats.nlp_entities||0)+'</span>'+
+          '<span style="font-size:9px;color:var(--text3);margin-left:12px">质量分布:</span>'+
+          ['A','B','C','D','F'].map(function(g){
+            var cnt=pipeStats.quality_dist?(pipeStats.quality_dist[g]||0):0;
+            if(cnt===0)return '';
+            var colors={A:'var(--green)',B:'var(--cyan)',C:'var(--orange)',D:'var(--red)',F:'var(--text3)'};
+            return '<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:'+colors[g]+'22;color:'+colors[g]+';font-weight:700">'+g+':'+cnt+'</span>';
+          }).join('')+
+        '</div>'+
+      '</div>':'')+
+      // 状态栏
+      '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px;background:rgba(0,212,255,0.06);border-radius:8px;margin-bottom:12px">'+
+        '<div style="display:flex;align-items:center;gap:6px">'+
+          '<span style="width:8px;height:8px;border-radius:50%;background:'+(status.isCollecting?'var(--orange)':'var(--green)')+';display:inline-block"></span>'+
+          '<span style="font-size:12px;font-weight:600;color:'+(status.isCollecting?'var(--orange)':'var(--green)')+'">'+(status.isCollecting?'采集中...':'就绪')+'</span>'+
+        '</div>'+
+        '<span style="font-size:11px;color:var(--text3)">上次采集: <b style="color:var(--text1)">'+lastTime+'</b></span>'+
+        '<span style="font-size:11px;color:var(--text3)">采集库总量: <b style="color:var(--cyan)">'+status.totalCollected+'</b> 条</span>'+
+        '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:auto">'+
+          '<input type="checkbox" '+autoChecked+' onchange="DATACENTER.toggleAutoCollect(this.checked)" style="cursor:pointer">'+
+          '<span style="font-size:12px;font-weight:600">自动采集 (每2小时)</span>'+
+        '</label>'+
+      '</div>'+
+      // 控制按钮
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+        '<button class="btn primary" onclick="DATACENTER.startWebScrape()" style="padding:10px 24px;font-size:14px;font-weight:700;'+(status.isCollecting?'opacity:0.5;pointer-events:none':'')+'">'+
+          '📡 一键采集全网数据'+
+        '</button>'+
+        '<button class="btn" onclick="DATACENTER.clearCollectedDB()" style="padding:10px 16px;font-size:12px">🗑️ 清空采集库</button>'+
+        '<button class="btn" onclick="DATACENTER.transferAllToDBCenter()" style="padding:10px 16px;font-size:12px;background:var(--green);color:#fff">📤 将已审核数据转入主数据库</button>'+
+      '</div>'+
+      // 数据源全景展示
+      '<details open>'+
+        '<summary style="cursor:pointer;font-size:12px;color:var(--text2);font-weight:600;padding:6px 0;margin-bottom:8px">📡 数据源全景 ('+Object.keys(registry).length+'类情报 · '+Object.keys(registry).reduce(function(s,k){return s+(registry[k]?registry[k].totalSources:0);},0)+'个数据源 · Google News聚合 · 国内源优先)</summary>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px">'+
+          sourceCardsHtml+
+        '</div>'+
+      '</details>'+
+      // DBCenter↔融合引擎↔监测中心 联动状态
+      '<div id="dc-linkage-panel" style="margin-top:12px;padding:10px 14px;background:rgba(0,255,136,0.04);border-radius:8px;border:1px solid rgba(0,255,136,0.1)">'+
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+          '<span style="font-size:10px;color:var(--green);font-weight:700">🔗 DBCenter(底座) → 融合引擎 → 监测中心(大脑)</span>'+
+          '<span style="font-size:10px;color:var(--text3)">采集→审核→入库→融合(事件↔项目匹配)→项目级预警</span>'+
+          '<span id="dc-linkage-status" style="margin-left:auto;font-size:10px;color:var(--text3)">● 待联动</span>'+
+        '</div>'+
+      '</div>'+
+      // 采集进度
+      '<div id="dc-scraper-progress" style="'+(status.isCollecting?'margin-top:10px':'display:none')+'"></div>'+
+      // 采集日志
+      '<div id="dc-log" style="max-height:120px;overflow-y:auto;margin-top:8px"></div>'+
+    '</div>';
+
+    el.innerHTML=html;
+    this.renderLog();
+    this._updateLinkageStatus();
+  },
+
+  // 更新DBCenter→融合→监测中心联动状态
+  _updateLinkageStatus(){
+    var el=document.getElementById('dc-linkage-status');
+    if(!el)return;
+    try{
+      var linkage=JSON.parse(localStorage.getItem('orps_monitor_linkage')||'{}');
+      if(linkage.timestamp){
+        var time=new Date(linkage.timestamp).toLocaleString('zh-CN');
+        var fusionInfo='';
+        if(linkage.fusion&&linkage.fusion.totalMatches>0){
+          fusionInfo=' | 融合:'+linkage.fusion.totalMatches+'条匹配';
+        }
+        el.innerHTML='<span style="color:var(--green)">● 已联动 '+time+fusionInfo+'</span>';
+      }else{
+        el.innerHTML='<span style="color:var(--text3)">● 待联动</span>';
+      }
+    }catch(e){el.innerHTML='<span style="color:var(--text3)">● 待联动</span>';}
+  },
+  // 采集进度更新
+  _updateScraperProgress(category,state,count,error){
+    var el=document.getElementById('dc-scraper-progress');
+    if(!el)return;
+    el.style.display='block';
+    var labels={
+      'terror_events':'💥 恐袭','security_events':'🛡️ 涉华安全','military_conflicts':'⚔️ 武装冲突',
+      'political_events':'🏛️ 政治风险','natural_disasters':'🌊 自然灾害','public_health':'🧧 公共卫生',
+      'sanctions_data':'🚫 制裁合规','social_unrest':'💬 社会动荡','infrastructure':'🚧 基础设施',
+      'geopolitical_intel':'🌐 地缘情报','osint_intel':'🔍 开源情报'
+    };
+    var icon=state==='done'?'✅':state==='error'?'❌':state==='collecting'?'⏳':'⬜';
+    var text=state==='done'?'+ '+count+'条':state==='error'?'失败: '+(error||''):'采集中...';
+    var color=state==='done'?'var(--green)':state==='error'?'var(--red)':'var(--orange)';
+
+    var existing=el.querySelector('[data-cat="'+category+'"]');
+    if(!existing){
+      var div=document.createElement('div');
+      div.setAttribute('data-cat',category);
+      div.style.cssText='padding:4px 10px;font-size:11px;display:flex;align-items:center;gap:8px';
+      el.appendChild(div);
+      existing=div;
     }
-    var formEl=document.getElementById('dc-manual-form');
-    if(formEl){
-      this._renderManualForm();
+    existing.innerHTML='<span>'+icon+'</span><span style="width:100px;color:var(--text2)">'+(labels[category]||category)+'</span><span style="color:'+color+';font-weight:600">'+text+'</span>';
+
+    // 全部完成时
+    if(!SCRAPER.isCollecting){
+      var total=0;
+      var results=SCRAPER.collectResults||{};
+      for(var k in results)total+=results[k];
+      var pipeStats=SCRAPER.getPipelineStats?SCRAPER.getPipelineStats():null;
+      var doneDiv=document.createElement('div');
+      doneDiv.style.cssText='padding:8px 10px;margin-top:6px;font-size:12px;font-weight:700;color:var(--green);background:rgba(0,255,136,0.08);border-radius:6px';
+      var pipeInfo='';
+      if(pipeStats&&pipeStats.raw>0){
+        pipeInfo=' (原始'+pipeStats.raw+' → NLP增强'+pipeStats.enriched+' → 质检'+pipeStats.qualified+' → 去重入库'+pipeStats.stored+' | 淘汰低质'+pipeStats.rejected_low+' 重复'+pipeStats.rejected_dup+')';
+      }
+      doneDiv.innerHTML='🎉 v5.0管道采集完成! 入库 '+total+' 条数据'+pipeInfo;
+      el.appendChild(doneDiv);
+      // 3秒后隐藏进度，刷新面板
+      setTimeout(function(){
+        if(!SCRAPER.isCollecting){
+          DATACENTER.renderScraperPanel();
+          DATACENTER.renderCollectedPanel();
+        }
+      },3000);
     }
+  },
+  // 一键采集全网数据
+  async startWebScrape(){
+    if(SCRAPER.isCollecting){
+      showToast('正在采集中，请稍候...');
+      return;
+    }
+    if(!PERM.guard('数据采集'))return;
+
+    this.renderScraperPanel(); // 显示进度区域
+    var progressEl=document.getElementById('dc-scraper-progress');
+    if(progressEl)progressEl.innerHTML='<div style="padding:8px;font-size:12px;color:var(--orange);font-weight:600">📡 正在从全网采集数据，请稍候...</div>';
+
+    showToast('📡 开始采集全网数据...');
+    var result=await SCRAPER.collectAll();
+
+    if(result){
+      var total=result.total;
+      var successCount=0;
+      var failCount=0;
+      for(var k in result.results){
+        if(result.results[k]>0)successCount++;
+        if(result.errors&&result.errors[k])failCount++;
+      }
+      var rawTotal=result.rawTotal||0;
+      var nlpEnt=result.nlpStats?result.nlpStats.entities:0;
+      showToast('✅ v5.0采集完成! 原始'+rawTotal+'条 → 入库'+total+'条 (NLP识别'+nlpEnt+'实体, '+successCount+'类成功'+(failCount>0?', '+failCount+'类失败':'')+')');
+    }
+
+    this.renderScraperPanel();
+    this.renderCollectedPanel();
+    this.renderStats();
+    this.renderTabs();
+    this.renderTable();
+    this.renderLog();
+    this.updateBadge();
+  },
+  // 切换自动采集
+  toggleAutoCollect(enabled){
+    if(enabled){
+      SCRAPER.startAutoCollect(120); // 每2小时
+      showToast('✅ 自动采集已启动 (每2小时自动采集全网数据)');
+    }else{
+      SCRAPER.stopAutoCollect();
+      showToast('自动采集已停止');
+    }
+    this.renderScraperPanel();
+  },
+  // 清空采集库
+  clearCollectedDB(){
+    if(!PERM.guard('清空采集库'))return;
+    if(!confirm('确定清空采集库中的所有数据？此操作不可恢复。'))return;
+    COLLECTED_DB.clear();
+    this.renderScraperPanel();
+    this.renderCollectedPanel();
+    showToast('采集库已清空');
+  },
+  // 将所有已审核数据转入主数据库
+  transferAllToDBCenter(){
+    if(!PERM.isAdmin()){
+      showToast('需要管理员权限');
+      return;
+    }
+    var totalApproved=0;
+    COLLECTED_DB.CATEGORIES.forEach(function(cat){
+      var s=COLLECTED_DB.getAuditSummary(cat);
+      totalApproved+=s.approved;
+    });
+    if(totalApproved===0){
+      showToast('没有已审核的数据可转入，请先在采集库中审核数据');
+      return;
+    }
+    if(!confirm('将 '+totalApproved+' 条已审核数据从采集库转入主数据库？\n转入后将从采集库删除，可在主数据库中同步到态势感知。'))return;
+    var count=COLLECTED_DB.transferAllApproved();
+    DBCenter.addLog('从采集库转入 '+count+' 条已审核数据到主数据库');
+    this.renderScraperPanel();
+    this.renderCollectedPanel();
+    this.renderStats();
+    this.renderTabs();
+    this.renderTable();
+    this.updateBadge();
+    showToast('✅ '+count+' 条数据已转入主数据库');
+  },
+  // ===== 中资企业海外项目库面板 =====
+  renderEnterprisePanel(){
+    var el=document.getElementById('dc-enterprise-panel');
+    if(!el||typeof ENTERPRISE_DB==='undefined')return;
+    var projects=ENTERPRISE_DB.getAll();
+    var stats=ENTERPRISE_DB.getStats();
+    var countries=ENTERPRISE_DB.getCountries();
+    var sectors=ENTERPRISE_DB.getSectors();
+
+    // 按国家分组统计
+    var countryList=Object.keys(countries).sort(function(a,b){return countries[b]-countries[a];});
+    var sectorList=Object.keys(sectors).sort(function(a,b){return sectors[b]-sectors[a];});
+
+    var html='<div style="padding:16px">'+
+      // 统计栏
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">'+
+        '<div style="padding:8px 16px;background:rgba(0,212,255,0.08);border-radius:8px">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--cyan)">'+stats.total+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">海外项目总数</div>'+
+        '</div>'+
+        '<div style="padding:8px 16px;background:rgba(255,170,0,0.08);border-radius:8px">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--orange)">'+stats.countries+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">覆盖国家/地区</div>'+
+        '</div>'+
+        '<div style="padding:8px 16px;background:rgba(0,200,83,0.08);border-radius:8px">'+
+          '<div style="font-size:22px;font-weight:700;color:var(--green)">'+stats.sectors+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">行业领域</div>'+
+        '</div>'+
+        '<div style="padding:8px 16px;background:rgba(255,61,127,0.08);border-radius:8px;margin-left:auto">'+
+          '<button class="btn sm primary" onclick="DATACENTER._showAddProjectForm()" style="margin-top:4px">➕ 添加项目</button>'+
+        '</div>'+
+      '</div>'+
+
+      // 国家分布
+      '<div style="margin-bottom:12px">'+
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:600">📍 项目所在国家分布</div>'+
+        '<div style="display:flex;gap:4px;flex-wrap:wrap">'+
+          countryList.map(function(c){
+            return '<span style="padding:2px 8px;background:var(--bg2);border-radius:4px;font-size:10px">'+
+              c+' <b style="color:var(--cyan)">'+countries[c]+'</b></span>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+
+      // 行业分布
+      '<div style="margin-bottom:12px">'+
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:600">🏭 行业领域分布</div>'+
+        '<div style="display:flex;gap:4px;flex-wrap:wrap">'+
+          sectorList.map(function(s){
+            return '<span style="padding:2px 8px;background:var(--bg2);border-radius:4px;font-size:10px">'+
+              s+' <b style="color:var(--orange)">'+sectors[s]+'</b></span>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+
+      // 项目表格
+      '<div class="table-wrap" style="max-height:400px;overflow-y:auto">'+
+        '<table style="width:100%;font-size:11px">'+
+          '<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">'+
+            '<th style="text-align:left;padding:6px 8px">项目名称</th>'+
+            '<th style="text-align:left;padding:6px 8px">国家/城市</th>'+
+            '<th style="text-align:left;padding:6px 8px">行业</th>'+
+            '<th style="text-align:left;padding:6px 8px">企业</th>'+
+            '<th style="text-align:left;padding:6px 8px">投资额</th>'+
+            '<th style="text-align:left;padding:6px 8px">状态</th>'+
+            '<th style="text-align:left;padding:6px 8px">风险</th>'+
+          '</tr></thead><tbody>'+
+          projects.map(function(p){
+            var riskColor=p.risk_level==='high'?'var(--red)':p.risk_level==='medium'?'var(--orange)':'var(--green)';
+            var riskLabel=p.risk_level==='high'?'🔴 高':p.risk_level==='medium'?'🟡 中':'🟢 低';
+            var statusColor=p.status==='运营中'?'var(--green)':p.status==='建设中'?'var(--orange)':'var(--cyan)';
+            return '<tr style="border-bottom:1px solid var(--border)">'+
+              '<td style="padding:6px 8px;font-weight:500">'+p.project_name+
+                '<div style="font-size:9px;color:var(--text3)">'+(p.desc||'').substring(0,60)+'</div></td>'+
+              '<td style="padding:6px 8px">'+p.country+'<div style="font-size:9px;color:var(--text3)">'+(p.city||'')+'</div></td>'+
+              '<td style="padding:6px 8px"><span style="font-size:10px;padding:1px 6px;background:var(--bg2);border-radius:3px">'+p.sector+'</span></td>'+
+              '<td style="padding:6px 8px;font-size:10px">'+(p.enterprise||'')+'</td>'+
+              '<td style="padding:6px 8px;font-size:10px;color:var(--cyan)">'+(p.investment||'')+'</td>'+
+              '<td style="padding:6px 8px"><span style="color:'+statusColor+';font-size:10px">'+p.status+'</span></td>'+
+              '<td style="padding:6px 8px"><span style="color:'+riskColor+';font-size:10px;font-weight:600">'+riskLabel+'</span></td>'+
+            '</tr>';
+          }).join('')+
+        '</tbody></table>'+
+      '</div>'+
+    '</div>';
+
+    el.innerHTML=html;
+  },
+
+  _showAddProjectForm(){
+    if(typeof ENTERPRISE_DB==='undefined')return;
+    var html='<div style="padding:16px">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:12px">➕ 添加中资企业海外项目</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+        '<input class="input" id="ep-name" placeholder="项目名称" style="font-size:12px">'+
+        '<input class="input" id="ep-country" placeholder="国家" style="font-size:12px">'+
+        '<input class="input" id="ep-city" placeholder="城市" style="font-size:12px">'+
+        '<input class="input" id="ep-sector" placeholder="行业(如:港口/铁路/能源/矿业)" style="font-size:12px">'+
+        '<input class="input" id="ep-enterprise" placeholder="企业名称" style="font-size:12px">'+
+        '<input class="input" id="ep-investment" placeholder="投资额" style="font-size:12px">'+
+        '<select class="select" id="ep-status" style="font-size:12px">'+
+          '<option value="建设中">建设中</option>'+
+          '<option value="运营中">运营中</option>'+
+          '<option value="规划中">规划中</option>'+
+        '</select>'+
+        '<select class="select" id="ep-risk" style="font-size:12px">'+
+          '<option value="high">高风险</option>'+
+          '<option value="medium">中风险</option>'+
+          '<option value="low">低风险</option>'+
+        '</select>'+
+      '</div>'+
+      '<textarea class="input" id="ep-desc" placeholder="项目描述" style="width:100%;margin-top:8px;font-size:12px;min-height:50px"></textarea>'+
+      '<div style="margin-top:10px;text-align:right">'+
+        '<button class="btn sm" onclick="DATACENTER.renderEnterprisePanel()">取消</button>'+
+        '<button class="btn sm primary" onclick="DATACENTER._submitProject()" style="margin-left:8px">保存</button>'+
+      '</div>'+
+    '</div>';
+    var el=document.getElementById('dc-enterprise-panel');
+    if(el)el.innerHTML=html;
+  },
+
+  _submitProject(){
+    if(typeof ENTERPRISE_DB==='undefined')return;
+    var name=document.getElementById('ep-name').value.trim();
+    var country=document.getElementById('ep-country').value.trim();
+    if(!name||!country){showToast('⚠️ 请填写项目名称和国家');return;}
+    ENTERPRISE_DB.add({
+      project_name:name,
+      country:country,
+      city:document.getElementById('ep-city').value.trim(),
+      sector:document.getElementById('ep-sector').value.trim()||'综合基建',
+      enterprise:document.getElementById('ep-enterprise').value.trim(),
+      investment:document.getElementById('ep-investment').value.trim(),
+      status:document.getElementById('ep-status').value,
+      risk_level:document.getElementById('ep-risk').value,
+      desc:document.getElementById('ep-desc').value.trim()
+    });
+    showToast('✅ 项目已添加');
+    this.renderEnterprisePanel();
+  },
+
+  // ===== 风险融合引擎面板 =====
+  renderFusionPanel(){
+    var el=document.getElementById('dc-fusion-panel');
+    if(!el||typeof RISK_FUSION==='undefined')return;
+    var summary=RISK_FUSION.getSummary();
+    var matches=RISK_FUSION.getResults();
+    var lastTime=summary.lastFusionTime?
+      new Date(summary.lastFusionTime).toLocaleString('zh-CN'):'从未执行';
+
+    var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+    var levelLabels={critical:'🔴 紧急',high:'🟠 高危',medium:'🟡 中危',low:'🟢 低危'};
+
+    var html='<div style="padding:16px">'+
+      // 融合引擎状态栏
+      '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px;background:rgba(255,61,127,0.06);border-radius:8px;margin-bottom:14px">'+
+        '<div style="display:flex;align-items:center;gap:6px">'+
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block"></span>'+
+          '<span style="font-size:12px;font-weight:600">融合引擎 v1.0</span>'+
+        '</div>'+
+        '<span style="font-size:11px;color:var(--text3)">上次融合: <b style="color:var(--text1)">'+lastTime+'</b></span>'+
+        '<span style="font-size:11px;color:var(--text3)">匹配总数: <b style="color:var(--cyan)">'+summary.totalMatches+'</b></span>'+
+        '<span style="font-size:11px;color:var(--text3)">受影响项目: <b style="color:var(--orange)">'+summary.affectedProjects+'</b></span>'+
+        '<span style="font-size:11px;color:var(--text3)">关联事件: <b style="color:var(--cyan)">'+summary.totalEvents+'</b></span>'+
+        '<button class="btn primary sm" onclick="DATACENTER.runFusion()" style="margin-left:auto">⚡ 执行风险融合</button>'+
+      '</div>'+
+
+      // 预警等级分布
+      '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">'+
+        ['critical','high','medium','low'].map(function(level){
+          var count=summary.byLevel?summary.byLevel[level]||0:0;
+          return '<div style="padding:8px 16px;background:'+levelColors[level]+'15;border-radius:8px;border:1px solid '+levelColors[level]+'30">'+
+            '<div style="font-size:18px;font-weight:700;color:'+levelColors[level]+'">'+count+'</div>'+
+            '<div style="font-size:10px;color:var(--text3)">'+levelLabels[level]+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+
+      // 融合结果表格
+      (matches.length>0?
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:600">🔗 事件-项目匹配结果 (按风险分数排序)</div>'+
+        '<div class="table-wrap" style="max-height:350px;overflow-y:auto">'+
+          '<table style="width:100%;font-size:11px">'+
+            '<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">'+
+              '<th style="text-align:left;padding:6px 8px">预警等级</th>'+
+              '<th style="text-align:left;padding:6px 8px">风险事件</th>'+
+              '<th style="text-align:left;padding:6px 8px">受影响项目</th>'+
+              '<th style="text-align:left;padding:6px 8px">国家</th>'+
+              '<th style="text-align:left;padding:6px 8px">行业</th>'+
+              '<th style="text-align:left;padding:6px 8px">匹配分</th>'+
+            '</tr></thead><tbody>'+
+            matches.slice(0,50).map(function(m){
+              var lc=levelColors[m.alert_level]||'var(--text3)';
+              return '<tr style="border-bottom:1px solid var(--border)">'+
+                '<td style="padding:6px 8px"><span style="color:'+lc+';font-size:10px;font-weight:600">'+(levelLabels[m.alert_level]||'')+'</span></td>'+
+                '<td style="padding:6px 8px;max-width:200px"><div style="font-weight:500">'+m.event_title.substring(0,50)+'</div>'+
+                  '<div style="font-size:9px;color:var(--text3)">'+m.event_date+' | '+m.event_type+'</div></td>'+
+                '<td style="padding:6px 8px;max-width:200px"><div style="font-weight:500">'+m.project_name+'</div>'+
+                  '<div style="font-size:9px;color:var(--text3)">'+m.project_enterprise+'</div></td>'+
+                '<td style="padding:6px 8px">'+m.project_country+'</td>'+
+                '<td style="padding:6px 8px"><span style="font-size:10px;padding:1px 6px;background:var(--bg2);border-radius:3px">'+m.project_sector+'</span></td>'+
+                '<td style="padding:6px 8px"><span style="color:'+lc+';font-weight:700">'+m.match_score+'</span></td>'+
+              '</tr>';
+            }).join('')+
+          '</tbody></table>'+
+        '</div>'
+      :
+        '<div style="text-align:center;padding:30px;color:var(--text3)">'+
+          '<div style="font-size:36px;margin-bottom:8px">🔗</div>'+
+          '<div style="font-size:13px;margin-bottom:4px">暂无融合结果</div>'+
+          '<div style="font-size:11px">请先采集数据 → 审核 → 转入主数据库 → 点击「执行风险融合」</div>'+
+        '</div>'
+      )+
+    '</div>';
+
+    el.innerHTML=html;
+  },
+
+  runFusion(){
+    if(typeof RISK_FUSION==='undefined'){showToast('⚠️ 融合引擎未加载');return;}
+    var result=RISK_FUSION.fuse();
+    this.renderFusionPanel();
+    showToast('⚡ 风险融合完成: '+result.total+'条匹配，涉及'+RISK_FUSION.getSummary().affectedProjects+'个项目');
+  },
+
+  // ===== 采集库面板 (独立数据库展示) =====
+  _collectedTab:'terror_events',
+  renderCollectedPanel(){
+    var el=document.getElementById('dc-collected-panel');
+    if(!el)return;
+    var me=this;
+    var stats=COLLECTED_DB.getStats();
+
+    // Tab 栏
+    var tabsHtml='<div class="dc-tabs" style="margin:0 0 10px 0">'+
+      COLLECTED_DB.CATEGORIES.map(function(cat){
+        var tabInfo=me.tabs.find(function(t){return t.key===cat;});
+        var label=tabInfo?tabInfo.label:cat;
+        var count=COLLECTED_DB.count(cat);
+        var audit=COLLECTED_DB.getAuditSummary(cat);
+        var badge='';
+        if(audit.pending>0)badge+='<span style="color:var(--orange);font-size:9px"> ('+audit.pending+'待审)</span>';
+        return '<div class="dc-tab '+(me._collectedTab===cat?'active':'')+'" onclick="DATACENTER.switchCollectedTab(\''+cat+'\')" style="font-size:11px">'+label+' ['+count+']'+badge+'</div>';
+      }).join('')+
+    '</div>';
+
+    // 当前类别的数据表格
+    var cat=this._collectedTab;
+    var data=COLLECTED_DB.getAll(cat);
+    var audit=COLLECTED_DB.getAuditSummary(cat);
+    var isAdmin=PERM.isAdmin();
+
+    // 审核操作栏
+    var auditBarHtml='';
+    if(isAdmin&&data.length>0){
+      auditBarHtml='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px;background:rgba(255,170,0,0.06);border-radius:6px;margin-bottom:8px">'+
+        '<span style="font-size:11px;color:var(--text3);font-weight:600">📋 采集库审核</span>'+
+        '<span style="font-size:10px;color:var(--orange)">🟡 待审核:<b>'+audit.pending+'</b></span>'+
+        '<span style="font-size:10px;color:var(--green)">🟢 已审核:<b>'+audit.approved+'</b></span>'+
+        '<span style="font-size:10px;color:var(--red)">🔴 驳回:<b>'+audit.rejected+'</b></span>'+
+        '<button class="btn" style="font-size:10px;padding:2px 8px;background:var(--green);color:#fff" onclick="DATACENTER.collectedApproveAll(\''+cat+'\')">✅ 全部通过</button>'+
+        (audit.approved>0?'<button class="btn" style="font-size:10px;padding:2px 8px;background:var(--cyan);color:#fff;margin-left:auto" onclick="DATACENTER.collectedTransferOne(\''+cat+'\')">📤 转入主数据库 ('+audit.approved+'条)</button>':'')+
+      '</div>';
+    }
+
+    // 数据表格
+    var tableHtml='';
+    if(data.length===0){
+      tableHtml='<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">'+
+        '<div style="font-size:32px;margin-bottom:8px">📭</div>'+
+        '采集库中暂无'+(this.tabs.find(function(t){return t.key===cat;})||{label:cat}).label+'数据<br>'+
+        '<span style="font-size:11px">点击上方"一键采集全网数据"从全网获取实时数据</span>'+
+      '</div>';
+    }else{
+      // 限制显示前30条
+      var displayData=data.slice(0,30);
+      tableHtml='<div class="table-wrap" style="max-height:350px;overflow-y:auto"><table style="font-size:11px">'+
+        '<thead><tr>'+
+        (isAdmin?'<th>操作</th>':'')+
+        '<th>审核</th><th>标题/描述</th><th>日期</th><th>国家</th><th>来源</th><th>区域</th>'+
+        '</tr></thead><tbody>'+
+        displayData.map(function(item){
+          var auditLabel=me.AUDIT_LABELS[item.audit_status||'pending']||'🟡 待审核';
+          var auditColor=me.AUDIT_COLORS[item.audit_status||'pending']||'var(--orange)';
+          var actionHtml='';
+          if(isAdmin){
+            if(item.audit_status==='pending'){
+              actionHtml='<td style="white-space:nowrap">'+
+                '<button class="btn" style="font-size:9px;padding:1px 6px;background:var(--green);color:#fff" onclick="DATACENTER.collectedSetAudit(\''+cat+'\','+item.id+',\'approved\')">✓通过</button>'+
+                '<button class="btn" style="font-size:9px;padding:1px 6px;background:var(--red);color:#fff;margin-left:2px" onclick="DATACENTER.collectedSetAudit(\''+cat+'\','+item.id+',\'rejected\')">✕驳回</button>'+
+              '</td>';
+            }else if(item.audit_status==='approved'){
+              actionHtml='<td style="white-space:nowrap">'+
+                '<button class="btn" style="font-size:9px;padding:1px 6px;background:var(--cyan);color:#fff" onclick="DATACENTER.collectedTransferItem(\''+cat+'\','+item.id+')">📤转入</button>'+
+              '</td>';
+            }else{
+              actionHtml='<td style="color:var(--text3);font-size:10px">已驳回</td>';
+            }
+          }
+          var desc=(item.title||item.desc||'').substring(0,60);
+          if((item.title||item.desc||'').length>60)desc+='...';
+          var regionColor=(item.source_region==='国内')?'var(--red)':'var(--blue)';
+          return '<tr style="border-bottom:1px solid var(--border)">'+
+            actionHtml+
+            '<td><span style="color:'+auditColor+';font-size:10px;font-weight:600">'+auditLabel+'</span></td>'+
+            '<td style="max-width:300px"><div style="font-weight:500">'+desc+'</div>'+
+              (item.url?'<a href="'+item.url+'" target="_blank" style="font-size:9px;color:var(--cyan)">查看原文</a>':'')+
+            '</td>'+
+            '<td style="white-space:nowrap">'+(item.date||'')+'</td>'+
+            '<td>'+(item.country||'未知')+'</td>'+
+            '<td style="font-size:10px">'+(item.source||'')+'</td>'+
+            '<td><span style="font-size:9px;color:'+regionColor+';font-weight:600">'+(item.source_region||'')+'</span></td>'+
+          '</tr>';
+        }).join('')+
+        '</tbody></table></div>';
+      if(data.length>30){
+        tableHtml+='<div style="padding:6px;text-align:center;font-size:11px;color:var(--text3)">仅显示前30条，共 '+data.length+' 条</div>';
+      }
+    }
+
+    el.innerHTML='<div style="padding:12px">'+
+      tabsHtml+
+      auditBarHtml+
+      tableHtml+
+    '</div>';
+  },
+  switchCollectedTab(cat){
+    this._collectedTab=cat;
+    this.renderCollectedPanel();
+  },
+  // 采集库审核操作
+  collectedSetAudit(cat,id,status){
+    COLLECTED_DB.setAuditStatus(cat,id,status);
+    this.renderCollectedPanel();
+    this.renderScraperPanel();
+  },
+  collectedApproveAll(cat){
+    if(!PERM.isAdmin())return;
+    var data=COLLECTED_DB.getAll(cat);
+    var pendingIds=data.filter(function(d){return d.audit_status==='pending';}).map(function(d){return d.id;});
+    if(!pendingIds.length){showToast('没有待审核数据');return;}
+    COLLECTED_DB.batchSetAuditStatus(cat,pendingIds,'approved');
+    this.renderCollectedPanel();
+    this.renderScraperPanel();
+    showToast('✅ '+pendingIds.length+' 条数据已审核通过');
+  },
+  collectedTransferItem(cat,id){
+    if(!PERM.isAdmin()){showToast('需要管理员权限');return;}
+    var ok=COLLECTED_DB.transferToDBCenter(cat,id);
+    if(ok){
+      DBCenter.addLog('从采集库转入1条数据到主数据库 ('+cat+')');
+      this.renderCollectedPanel();
+      this.renderScraperPanel();
+      this.renderStats();
+      this.renderTabs();
+      this.renderTable();
+      this.updateBadge();
+      showToast('✅ 数据已转入主数据库');
+    }else{
+      showToast('转入失败，请确保数据已审核通过');
+    }
+  },
+  collectedTransferOne(cat){
+    if(!PERM.isAdmin())return;
+    var audit=COLLECTED_DB.getAuditSummary(cat);
+    if(audit.approved===0){showToast('没有已审核数据');return;}
+    var count=COLLECTED_DB.transferApprovedToDBCenter(cat);
+    DBCenter.addLog('从采集库转入 '+count+' 条数据到主数据库 ('+cat+')');
+    this.renderCollectedPanel();
+    this.renderScraperPanel();
+    this.renderStats();
+    this.renderTabs();
+    this.renderTable();
+    this.updateBadge();
+    showToast('✅ '+count+' 条数据已转入主数据库');
   },
   _manualFormType:'terror_events',
   _renderManualForm(){
@@ -637,82 +1697,69 @@ var DATACENTER={
         {k:'desc',lb:'事件描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
-      {key:'economic_data',lb:'📉 经济数据',fields:[
-        {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'indicator',lb:'指标名称',tp:'select',opts:['汇率','通胀率','GDP增速','利率','失业率','外汇储备','主权评级'],req:true},
-        {k:'value',lb:'指标数值',tp:'text',req:true},
-        {k:'change',lb:'变化幅度',tp:'text',req:false},
-        {k:'date',lb:'数据日期',tp:'date',req:true}
+      {key:'military_conflicts',lb:'⚔️ 武装冲突',fields:[
+        {k:'date',lb:'发生日期',tp:'date',req:true},
+        {k:'country',lb:'国家/地区',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+        {k:'location',lb:'冲突地点',tp:'text',req:true},
+        {k:'conflict_type',lb:'冲突类型',tp:'select',opts:['武装冲突','海上袭击','内战','跨境冲突','恐怖袭击','边境冲突'],req:true},
+        {k:'parties',lb:'参战方',tp:'text',req:true},
+        {k:'casualties',lb:'伤亡情况',tp:'text',req:false},
+        {k:'desc',lb:'事件描述',tp:'textarea',req:true},
+        {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
-      {key:'news_articles',lb:'📰 新闻资讯',fields:[
-        {k:'title',lb:'新闻标题',tp:'text',req:true},
-        {k:'source',lb:'新闻来源',tp:'text',req:true},
-        {k:'country',lb:'相关国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'date',lb:'发布日期',tp:'date',req:true},
-        {k:'summary',lb:'新闻摘要',tp:'textarea',req:true}
-      ]},
-      {key:'political_events',lb:'🏛️ 政治事件',fields:[
+      {key:'political_events',lb:'🏛️ 政治风险',fields:[
         {k:'date',lb:'发生日期',tp:'date',req:true},
         {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'event_type',lb:'事件类型',tp:'select',opts:['政变','选举','政府改组','政策调整','宪法修改','政治危机'],req:true},
+        {k:'event_type',lb:'事件类型',tp:'select',opts:['政府更迭','军事政变','内战','选举争议','边境冲突','军事对抗','抗议示威'],req:true},
         {k:'title',lb:'事件标题',tp:'text',req:true},
         {k:'impact',lb:'影响等级',tp:'select',opts:['red','orange','yellow'],req:true},
         {k:'desc',lb:'事件描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
-      {key:'military_conflicts',lb:'🎖️ 军事冲突',fields:[
-        {k:'date',lb:'发生日期',tp:'date',req:true},
-        {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'location',lb:'冲突地点',tp:'text',req:true},
-        {k:'conflict_type',lb:'冲突类型',tp:'select',opts:['内战','跨境冲突','武装冲突','空袭','导弹攻击','无人机攻击'],req:true},
-        {k:'parties',lb:'参与方',tp:'text',req:true},
-        {k:'casualties',lb:'伤亡情况',tp:'text',req:false},
-        {k:'desc',lb:'事件描述',tp:'textarea',req:true},
+      {key:'geopolitical_intel',lb:'🌐 地缘情报',fields:[
+        {k:'date',lb:'情报日期',tp:'date',req:true},
+        {k:'country',lb:'国家/地区',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+        {k:'intel_type',lb:'情报类型',tp:'select',opts:['出口管制','政策调整','多边外交','双边关系','领事保护','经济风险','贸易数据','战略调整','安全预警','投资风险'],req:true},
+        {k:'title',lb:'情报标题',tp:'text',req:true},
+        {k:'risk_level',lb:'风险等级',tp:'select',opts:['red','orange','yellow'],req:true},
+        {k:'impact',lb:'对华影响',tp:'text',req:false},
+        {k:'desc',lb:'详细摘要',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
       {key:'natural_disasters',lb:'🌊 自然灾害',fields:[
         {k:'date',lb:'发生日期',tp:'date',req:true},
-        {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'disaster_type',lb:'灾害类型',tp:'select',opts:['地震','台风','洪水','泥石流','火山喷发','海啸','干旱'],req:true},
-        {k:'title',lb:'灾害名称',tp:'text',req:true},
+        {k:'country',lb:'国家/地区',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+        {k:'disaster_type',lb:'灾害类型',tp:'select',opts:['地震','台风','洪水','山火','气旋/洪水','火山喷发'],req:true},
+        {k:'title',lb:'事件标题',tp:'text',req:true},
         {k:'magnitude',lb:'强度/规模',tp:'text',req:false},
         {k:'casualties',lb:'伤亡情况',tp:'text',req:false},
-        {k:'desc',lb:'灾害描述',tp:'textarea',req:true},
+        {k:'desc',lb:'事件描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
       {key:'public_health',lb:'🧧 公共卫生',fields:[
         {k:'date',lb:'发生日期',tp:'date',req:true},
-        {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'health_type',lb:'类型',tp:'select',opts:['传染病爆发','食品安全','环境污染','医疗危机'],req:true},
+        {k:'country',lb:'国家/地区',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+        {k:'health_type',lb:'事件类型',tp:'select',opts:['传染病爆发','环境污染','食品安全','医疗危机'],req:true},
         {k:'title',lb:'事件标题',tp:'text',req:true},
-        {k:'severity',lb:'严重程度',tp:'select',opts:['red','orange','yellow'],req:true},
-        {k:'cases',lb:'感染/影响人数',tp:'text',req:false},
+        {k:'severity',lb:'严重等级',tp:'select',opts:['red','orange','yellow'],req:true},
+        {k:'cases',lb:'感染/影响',tp:'text',req:false},
         {k:'desc',lb:'事件描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
-      {key:'diplomatic_events',lb:'🌐 外交事件',fields:[
-        {k:'date',lb:'发生日期',tp:'date',req:true},
-        {k:'country',lb:'相关国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'event_type',lb:'事件类型',tp:'select',opts:['外交斡旋','领事会谈','联合声明','断交','复交','制裁措施'],req:true},
-        {k:'title',lb:'事件标题',tp:'text',req:true},
-        {k:'impact',lb:'影响等级',tp:'select',opts:['red','orange','yellow'],req:true},
-        {k:'desc',lb:'事件描述',tp:'textarea',req:true},
-        {k:'source',lb:'信息来源',tp:'text',req:false}
-      ]},
-      {key:'sanctions_compliance',lb:'🚫 制裁合规',fields:[
-        {k:'date',lb:'发布日期',tp:'date',req:true},
-        {k:'country',lb:'制裁方',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+      {key:'sanctions_data',lb:'🚫 制裁合规',fields:[
+        {k:'date',lb:'实施日期',tp:'date',req:true},
+        {k:'country',lb:'发起方',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
         {k:'target_country',lb:'被制裁方',tp:'text',req:true},
-        {k:'sanction_type',lb:'制裁类型',tp:'select',opts:['经济制裁','金融制裁','技术封锁','个人制裁','出口管制'],req:true},
+        {k:'sanction_type',lb:'制裁类型',tp:'select',opts:['经济制裁','贸易限制','出口管制','定向制裁','金融制裁'],req:true},
         {k:'title',lb:'制裁标题',tp:'text',req:true},
-        {k:'affected_industry',lb:'受影响行业',tp:'text',req:false},
-        {k:'desc',lb:'制裁描述',tp:'textarea',req:true},
+        {k:'target',lb:'制裁目标',tp:'text',req:false},
+        {k:'desc',lb:'详细描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
       {key:'social_unrest',lb:'💬 社会动荡',fields:[
         {k:'date',lb:'发生日期',tp:'date',req:true},
         {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'unrest_type',lb:'动荡类型',tp:'select',opts:['罢工','抗议','示威','骚乱','暴力冲突'],req:true},
+        {k:'unrest_type',lb:'动荡类型',tp:'select',opts:['罢工','抗议','示威','骚乱','暴力冲突','民众运动'],req:true},
         {k:'title',lb:'事件标题',tp:'text',req:true},
         {k:'intensity',lb:'强度',tp:'select',opts:['red','orange','yellow'],req:true},
         {k:'participants',lb:'参与人数',tp:'text',req:false},
@@ -720,12 +1767,12 @@ var DATACENTER={
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]},
       {key:'infrastructure',lb:'🚧 基础设施',fields:[
-        {k:'date',lb:'日期',tp:'date',req:true},
-        {k:'country',lb:'国家',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
-        {k:'infra_type',lb:'设施类型',tp:'select',opts:['港口','铁路','公路','电力','油气','通信','水利'],req:true},
+        {k:'date',lb:'更新日期',tp:'date',req:true},
+        {k:'country',lb:'所在国',tp:'select',opts:COUNTRIES.map(function(c){return c.name;}),req:true},
+        {k:'infra_type',lb:'设施类型',tp:'select',opts:['港口','高铁','铁路','油气','电力','工业园区'],req:true},
         {k:'title',lb:'项目名称',tp:'text',req:true},
-        {k:'status',lb:'状态',tp:'select',opts:['规划中','建设中','运营中','即将通车','暂停'],req:true},
-        {k:'desc',lb:'项目描述',tp:'textarea',req:true},
+        {k:'status',lb:'项目状态',tp:'select',opts:['建设中','运营中','规划中','即将通车','暂停','已中断'],req:true},
+        {k:'desc',lb:'详细描述',tp:'textarea',req:true},
         {k:'source',lb:'信息来源',tp:'text',req:false}
       ]}
     ];
@@ -757,28 +1804,24 @@ var DATACENTER={
     var fields={
       terror_events:['date','country','city','group','type','target','deaths','injured','desc','source'],
       security_events:['date','country','location','type','severity','title','deaths','injured','people','desc','source'],
-      economic_data:['country','indicator','value','change','date'],
-      news_articles:['title','source','country','date','summary'],
-      political_events:['date','country','event_type','title','impact','desc','source'],
       military_conflicts:['date','country','location','conflict_type','parties','casualties','desc','source'],
+      political_events:['date','country','event_type','title','impact','desc','source'],
+      geopolitical_intel:['date','country','intel_type','title','risk_level','impact','desc','source'],
       natural_disasters:['date','country','disaster_type','title','magnitude','casualties','desc','source'],
       public_health:['date','country','health_type','title','severity','cases','desc','source'],
-      diplomatic_events:['date','country','event_type','title','impact','desc','source'],
-      sanctions_compliance:['date','country','target_country','sanction_type','title','affected_industry','desc','source'],
+      sanctions_data:['date','country','target_country','sanction_type','title','target','desc','source'],
       social_unrest:['date','country','unrest_type','title','intensity','participants','desc','source'],
       infrastructure:['date','country','infra_type','title','status','desc','source']
     };
     var reqFields={
       terror_events:['date','country','city','type','target','deaths','desc'],
       security_events:['date','country','location','type','severity','title','desc'],
-      economic_data:['country','indicator','value','date'],
-      news_articles:['title','source','country','date','summary'],
-      political_events:['date','country','event_type','title','impact','desc'],
       military_conflicts:['date','country','location','conflict_type','parties','desc'],
+      political_events:['date','country','event_type','title','impact','desc'],
+      geopolitical_intel:['date','country','intel_type','title','risk_level','desc'],
       natural_disasters:['date','country','disaster_type','title','desc'],
       public_health:['date','country','health_type','title','severity','desc'],
-      diplomatic_events:['date','country','event_type','title','impact','desc'],
-      sanctions_compliance:['date','country','target_country','sanction_type','title','desc'],
+      sanctions_data:['date','country','target_country','sanction_type','title','desc'],
       social_unrest:['date','country','unrest_type','title','intensity','desc'],
       infrastructure:['date','country','infra_type','title','status','desc']
     };
@@ -797,10 +1840,12 @@ var DATACENTER={
     }
     if(type==='terror_events'){data.data_type='terror';}
     else if(type==='security_events'){data.data_type='china_security';}
-    // 权限检查：管理员直接录入，普通用户需审核
+    // 权限检查：管理员直接录入并自动标记为已审核，普通用户需审核
     if(PERM.isAdmin()){
+      data.audit_status='approved';
+      data.audit_time=new Date().toISOString();
       DBCenter.add(type,data);
-      DBCenter.addLog('管理员直接录入'+type+'数据: 1条');
+      DBCenter.addLog('管理员直接录入'+type+'数据: 1条 (已自动审核)');
       AUDIT.log('数据直接录入',type,JSON.stringify(data).substring(0,200));
       this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
       showToast('\u2705 \u6570\u636e\u5df2\u6210\u529f\u5f55\u5165\uff08\u7ba1\u7406\u5458\u514d\u5ba1\uff09');
@@ -827,179 +1872,99 @@ var DATACENTER={
   _clearManualForm(){
     document.querySelectorAll('[id^="mf-"]').forEach(function(el){if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.tagName==='SELECT')el.value='';});
   },
-  _autoTimer:null,
-  toggleAuto(){
-    if(this._autoTimer){
-      clearInterval(this._autoTimer);this._autoTimer=null;
-      DBCenter.addLog('自动采集已停止');
-      showToast('自动采集已停止');
-    }else{
-      this._autoTimer=setInterval(function(){DATACENTER.collectAll();},60000);
-      DBCenter.addLog('自动采集已启动 (每分钟检测)');
-      showToast('自动采集已启动');
+  // ===== 旧版采集方法已废弃，改为调用 SCRAPER 全网采集引擎 =====
+  // 采集的数据存入独立采集库(COLLECTED_DB)，不再直接写入DBCenter
+  async collectAll(){
+    await this.startWebScrape();
+  },
+  async collectTerror(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('terror_events');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集恐袭数据: +'+c+'条 (来自GDELT)');
+  },
+  async collectSecurity(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('security_events');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集涉华安全: +'+c+'条 (来自GDELT)');
+  },
+  async collectGeopolitical(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('geopolitical_intel');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集地缘情报: +'+c+'条 (来自GDELT)');
+  },
+  async collectPolitical(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('political_events');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集政治风险: +'+c+'条 (来自GDELT)');
+  },
+  async collectMilitary(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('military_conflicts');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集武装冲突: +'+c+'条 (来自GDELT+ReliefWeb)');
+  },
+  async collectDisasters(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('natural_disasters');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集自然灾害: +'+c+'条 (来自USGS+GDACS+ReliefWeb)');
+  },
+  async collectHealth(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('public_health');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集公共卫生: +'+c+'条 (来自WHO RSS+GDELT)');
+  },
+  async collectSanctions(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('sanctions_data');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集制裁合规: +'+c+'条 (来自GDELT)');
+  },
+  async collectSocial(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('social_unrest');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集社会动荡: +'+c+'条 (来自GDELT)');
+  },
+  async collectInfra(){
+    if(SCRAPER.isCollecting)return;
+    var c=await SCRAPER.collectCategory('infrastructure');
+    this.renderScraperPanel();this.renderCollectedPanel();
+    showToast('采集基础设施: +'+c+'条 (来自GDELT)');
+  },
+  // 表头列值下拉筛选
+  _toggleColDropdown(k,vals){
+    var safeK=k.replace(/[^a-zA-Z0-9_]/g,'_');
+    var ddEl=document.getElementById('thdd-'+safeK);
+    if(!ddEl)return;
+    // Close any open dropdown
+    var exist=document.querySelector('.th-dd-menu');
+    if(exist&&exist.parentElement===ddEl){
+      exist.remove();return;
     }
-    this.renderLog();
-  },
-  collectAll(){
-    this.collectTerror();this.collectSecurity();this.collectEconomic();this.collectNews();
-    this.collectPolitical();this.collectMilitary();this.collectDisasters();this.collectHealth();
-    this.collectDiplomatic();this.collectSanctions();this.collectSocial();this.collectInfra();
-    DBCenter.addLog('自动采集完成 - 全部12类数据');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
-    this.updateBadge();
-  },
-  collectTerror(){
-    var count=0;
-    if(typeof TERROR_EVENTS!=='undefined'){
-      var existing=DBCenter.count('terror_events');
-      TERROR_EVENTS.forEach(function(e){
-        if(existing<TERROR_EVENTS.length){
-          var o={};for(var k in e)o[k]=e[k];o.data_type='terror';
-          DBCenter.add('terror_events',o);count++;
-        }
-      });
-    }
-    DBCenter.addLog('采集恐袭数据: +'+count+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
-    this.updateBadge();
-    showToast('采集恐袭数据: +'+count+'条');
-  },
-  collectSecurity(){
-    var count=0;
-    if(typeof CHINA_SECURITY!=='undefined'){
-      var existing=DBCenter.count('security_events');
-      CHINA_SECURITY.forEach(function(e){
-        if(existing<CHINA_SECURITY.length){
-          var o={};for(var k in e)o[k]=e[k];o.data_type='china_security';
-          DBCenter.add('security_events',o);count++;
-        }
-      });
-    }
-    DBCenter.addLog('采集安全数据: +'+count+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
-    this.updateBadge();
-    showToast('采集安全数据: +'+count+'条');
-  },
-  collectEconomic(){
-    var data=[
-      {country:'巴基斯坦',indicator:'汇率',value:'278.5 PKR/USD',change:'-2.3%',date:'2025-06-01'},
-      {country:'土耳其',indicator:'通胀率',value:'64.8%',change:'+1.2%',date:'2025-06-01'},
-      {country:'埃及',indicator:'汇率',value:'50.7 EGP/USD',change:'-60%',date:'2025-06-01'},
-      {country:'阿根廷',indicator:'汇率',value:'850 ARS/USD',change:'-54%',date:'2025-06-01'}
-    ];
-    data.forEach(function(d){DBCenter.add('economic_data',d);});
-    DBCenter.addLog('采集经济数据: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
-    this.updateBadge();
-    showToast('采集经济数据: +'+data.length+'条');
-  },
-  collectNews(){
-    var news=[
-      {title:'苏丹冲突双方停火谈判再陷僵局',source:'路透社',country:'苏丹',date:'2025-06-01'},
-      {title:'红海航运安全形势依然严峻',source:'彭博社',country:'也门',date:'2025-06-01'},
-      {title:'巴基斯坦安全部队击毙多名武装分子',source:'新华社',country:'巴基斯坦',date:'2025-06-01'}
-    ];
-    news.forEach(function(n){DBCenter.add('news_articles',n);});
-    DBCenter.addLog('采集新闻数据: +'+news.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();
-    this.updateBadge();
-    showToast('采集新闻数据: +'+news.length+'条');
-  },
-  collectPolitical(){
-    var data=[
-      {country:'孟加拉国',event_type:'政府更迭',title:'临时政府面临倒台危机',severity:'high',date:'2026-07-12',desc:'学生组织全国大罢工要求加快选举，达卡交通瘫痪',source:'路透社'},
-      {country:'尼日尔',event_type:'军事政变',title:'军政府延长过渡期',severity:'high',date:'2026-07-10',desc:'尼日尔军政府宣布延长过渡期3年，国际社会谴责',source:'法新社'},
-      {country:'苏丹',event_type:'内战',title:'苏丹武装冲突持续',severity:'critical',date:'2026-07-13',desc:'快速支援部队与政府军冲突加剧，人道主义危机恶化',source:'联合国'},
-      {country:'委内瑞拉',event_type:'选举争议',title:'大选争议引发动荡',severity:'high',date:'2026-07-11',desc:'反对派质疑选举公正性，多地爆发抗议',source:'美联社'}
-    ];
-    data.forEach(function(d){DBCenter.add('political_events',d);});
-    DBCenter.addLog('采集政治事件: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集政治事件: +'+data.length+'条');
-  },
-  collectMilitary(){
-    var data=[
-      {country:'乌克兰',conflict_type:'武装冲突',title:'东部战线激烈交火',intensity:'high',date:'2026-07-13',casualties:'未知',desc:'乌东战线多地区发生激烈炮战',source:'BBC'},
-      {country:'也门',conflict_type:'海上袭击',title:'红海商船再遭袭击',intensity:'high',date:'2026-07-12',casualties:'2人受伤',desc:'胡塞武装在红海袭击一艘商船',source:'路透社'},
-      {country:'缅甸',conflict_type:'内战',title:'缅北战事再起',intensity:'medium',date:'2026-07-10',casualties:'未知',desc:'民族武装与政府军在掸邦北部交火',source:'伊洛瓦底'},
-      {country:'萨赫勒地区',conflict_type:'恐怖袭击',title:'JNIM跨边境袭击',intensity:'high',date:'2026-07-11',casualties:'30余人死亡',desc:'JNIM在马里/布基纳法索边境发动大规模袭击',source:'法新社'}
-    ];
-    data.forEach(function(d){DBCenter.add('military_conflicts',d);});
-    DBCenter.addLog('采集军事冲突: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集军事冲突: +'+data.length+'条');
-  },
-  collectDisasters(){
-    var data=[
-      {country:'日本',disaster_type:'地震',title:'本州东海岸5.8级地震',magnitude:'5.8',date:'2026-07-12',casualties:'无',desc:'震源深度40公里，暂无重大损失报告',source:'日本气象厅'},
-      {country:'菲律宾',disaster_type:'台风',title:'台风"蝎子"登陆吕宋岛',magnitude:'15级',date:'2026-07-10',casualties:'3人失踪',desc:'超强台风引发洪水和山体滑坡',source:'CNN'},
-      {country:'尼泊尔',disaster_type:'洪水',title:'季风暴雨引发洪灾',magnitude:'严重',date:'2026-07-11',casualties:'12人死亡',desc:'持续暴雨导致多地洪水泛滥',source:'新华社'},
-      {country:'智利',disaster_type:'火山',title:'比利亚里卡火山喷发',magnitude:'中度',date:'2026-07-09',casualties:'无',desc:'火山灰柱高达3000米，周边居民撤离',source:'路透社'}
-    ];
-    data.forEach(function(d){DBCenter.add('natural_disasters',d);});
-    DBCenter.addLog('采集自然灾害: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集自然灾害: +'+data.length+'条');
-  },
-  collectHealth(){
-    var data=[
-      {country:'刚果(金)',disease_type:'埃博拉',title:'北基伍省埃博拉疫情',cases:42,deaths:18,date:'2026-07-12',desc:'第15轮埃博拉疫情确认爆发，WHO已派团队',source:'WHO'},
-      {country:'巴基斯坦',disease_type:'霍乱',title:'信德省霍乱疫情扩散',cases:320,deaths:5,date:'2026-07-10',desc:'洪水后霍乱在信德省扩散',source:'CNN'},
-      {country:'东南亚',disease_type:'登革热',title:'东南亚登革热高发季',cases:5800,deaths:12,date:'2026-07-11',desc:'多国进入登革热高发期',source:'WHO'},
-      {country:'西非',disease_type:'拉沙热',title:'尼日利亚拉沙热疫情',cases:180,deaths:28,date:'2026-07-09',desc:'拉沙热在尼日利亚多州蔓延',source:'NCDC'}
-    ];
-    data.forEach(function(d){DBCenter.add('public_health',d);});
-    DBCenter.addLog('采集公共卫生: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集公共卫生: +'+data.length+'条');
-  },
-  collectDiplomatic(){
-    var data=[
-      {country:'中国',event_type:'双边会谈',title:'中非合作论坛部长级会议',date:'2026-07-12',desc:'中非合作论坛在北京举行，签署多项合作协议',source:'外交部'},
-      {country:'美国',event_type:'制裁',title:'美对华芯片出口管制升级',date:'2026-07-11',desc:'美商务部新增37家中国实体至实体清单',source:'路透社'},
-      {country:'俄罗斯',event_type:'双边会谈',title:'中俄联合军演',date:'2026-07-10',desc:'中俄海军在南海举行联合军事演习',source:'国防部'},
-      {country:'欧盟',event_type:'政策调整',title:'欧盟调整对华贸易政策',date:'2026-07-09',desc:'欧盟发布对华经贸关系新战略文件',source:'欧盟委员会'}
-    ];
-    data.forEach(function(d){DBCenter.add('diplomatic_events',d);});
-    DBCenter.addLog('采集外交事件: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集外交事件: +'+data.length+'条');
-  },
-  collectSanctions(){
-    var data=[
-      {country:'俄罗斯',sanction_type:'经济制裁',title:'美欧对俄第18轮制裁',target:'能源和金融',date:'2026-07-12',impact:'严重',desc:'新一轮制裁针对俄能源出口和金融机构',source:'路透社'},
-      {country:'伊朗',sanction_type:'贸易限制',title:'美延长对伊石油制裁豁免',target:'石油出口',date:'2026-07-10',impact:'中等',desc:'美国延长伊拉克购买伊朗电力的制裁豁免',source:'美财政部'},
-      {country:'白俄罗斯',sanction_type:'出口管制',title:'欧盟对白俄制裁扩展',target:'钾肥出口',date:'2026-07-08',impact:'中等',desc:'欧盟新增对白俄罗斯钾肥出口制裁',source:'欧盟'},
-      {country:'缅甸',sanction_type:' targeted',title:'美英对缅军政府个人制裁',target:'军政府高官',date:'2026-07-07',impact:'轻微',desc:'美英对缅甸军政府10名高官实施个人制裁',source:'美财政部'}
-    ];
-    data.forEach(function(d){DBCenter.add('sanctions_data',d);});
-    DBCenter.addLog('采集制裁合规: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集制裁合规: +'+data.length+'条');
-  },
-  collectSocial(){
-    var data=[
-      {country:'法国',unrest_type:'罢工',title:'法国全国大罢工',intensity:'high',date:'2026-07-12',desc:'养老金改革引发全国大罢工，交通严重中断',source:'BBC'},
-      {country:'阿根廷',unrest_type:'抗议',title:'布宜诺斯艾利斯大规模抗议',intensity:'high',date:'2026-07-11',desc:'经济政策引发大规模社会抗议',source:'路透社'},
-      {country:'伊朗',unrest_type:'示威',title:'德黑兰爆发反政府示威',intensity:'medium',date:'2026-07-10',desc:'经济困境引发多个城市示威活动',source:'CNN'},
-      {country:'肯尼亚',unrest_type:'骚乱',title:'内罗毕抗议加税法案',intensity:'high',date:'2026-07-09',desc:'增税法案引发暴力抗议，多人伤亡',source:'法新社'}
-    ];
-    data.forEach(function(d){DBCenter.add('social_unrest',d);});
-    DBCenter.addLog('采集社会动荡: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集社会动荡: +'+data.length+'条');
-  },
-  collectInfra(){
-    var data=[
-      {country:'巴基斯坦',infra_type:'港口',title:'瓜达尔港扩建进展',status:'进行中',date:'2026-07-12',desc:'瓜达尔港二期扩建工程进展顺利',source:'中巴经济走廊'},
-      {country:'印度尼西亚',infra_type:'高铁',title:'雅万高铁运营满月',status:'运营中',date:'2026-07-10',desc:'雅万高铁运营满月，客流超预期',source:'新华社'},
-      {country:'肯尼亚',infra_type:'铁路',title:'蒙内铁路升级',status:'规划中',date:'2026-07-08',desc:'蒙内铁路电气化升级进入规划阶段',source:'路透社'},
-      {country:'匈牙利',infra_type:'铁路',title:'匈塞铁路匈牙利段通车',status:'即将通车',date:'2026-07-07',desc:'匈塞铁路匈牙利段即将正式通车',source:'新华社'}
-    ];
-    data.forEach(function(d){DBCenter.add('infrastructure',d);});
-    DBCenter.addLog('采集基础设施: +'+data.length+'条');
-    this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
-    showToast('采集基础设施: +'+data.length+'条');
+    if(exist)exist.remove();
+    // Build dropdown
+    var me=this;
+    var menu=document.createElement('div');
+    menu.className='th-dd-menu';
+    menu.style.cssText='position:absolute;top:22px;left:0;z-index:999;background:var(--bg);border:1px solid var(--border);border-radius:6px;min-width:140px;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.3);';
+    var html=vals.map(function(v){
+      return '<div style="padding:5px 10px;font-size:11px;cursor:pointer;white-space:nowrap;color:var(--text)" onmousedown="event.stopPropagation();event.preventDefault();DATACENTER.search=\''+(v||'').replace(/'/g,"\\'")+'\';DATACENTER.page=1;DATACENTER.renderTable();var m=document.querySelector(\'.th-dd-menu\');if(m)m.remove();" onmouseover="this.style.background=\'rgba(0,212,255,0.08)\'" onmouseout="this.style.background=\'\'">'+v+'</div>';
+    }).join('');
+    html+='<div style="padding:5px 10px;font-size:10px;color:var(--text3);border-top:1px solid var(--border);cursor:pointer;text-align:center" onmousedown="event.stopPropagation();event.preventDefault();DATACENTER.search=\'\';DATACENTER.page=1;DATACENTER.renderTable();var m=document.querySelector(\'.th-dd-menu\');if(m)m.remove();">✕ 清除筛选</div>';
+    menu.innerHTML=html;
+    ddEl.appendChild(menu);
+    // Close on outside click
+    setTimeout(function(){
+      document.addEventListener('click',function closeMenu(e){
+        if(!ddEl.contains(e.target)){menu.remove();document.removeEventListener('click',closeMenu);}
+      },{once:true});
+    },10);
   },
   renderLog(){
     var el=document.getElementById('dc-log');
@@ -1010,34 +1975,61 @@ var DATACENTER={
     }).join(''):'<div class="text-xs text-muted">暂无采集日志</div>';
   },
   showRowDetail(idx){
-    var data=DBCenter.getAll(this.currentTab);
-    var row=data[idx];
+    // Legacy method - redirect to filtered version
+    this.showRowDetailById(idx);
+  },
+  showRowDetailById(idx){
+    var allData=DBCenter.getAll(this.currentTab);
+    var filtered=this._applyFilters(allData.slice());
+    var row=filtered[idx];
     if(!row)return;
     var tabLabel=this.tabs.find(function(t){return t.key===DATACENTER.currentTab;});
+    var me=this;
     var html='<div style="padding:12px;background:var(--bg2);border-radius:8px;margin-bottom:12px"><div style="font-size:12px;color:var(--cyan);font-weight:700;margin-bottom:8px">'+(tabLabel?tabLabel.label:this.currentTab)+' — 记录详情</div></div>';
     html+='<div style="display:grid;gap:6px">';
-    Object.keys(row).forEach(function(k){
+    var prio=['date','time','country','city','location','group','type','title','desc','summary','deaths','injured','severity','impact','intensity','status','source','data_type','collect_time','id'];
+    var orderedKeys=[];
+    prio.forEach(function(k){if(row.hasOwnProperty(k)&&orderedKeys.indexOf(k)<0)orderedKeys.push(k);});
+    Object.keys(row).forEach(function(k){if(orderedKeys.indexOf(k)<0)orderedKeys.push(k);});
+    orderedKeys.forEach(function(k){
       var v=row[k];
       if(v===null||v===undefined)v='';
       v=String(v);
-      html+='<div style="display:flex;gap:10px;padding:8px 10px;background:var(--bg2);border-radius:6px;border-left:2px solid var(--cyan)">'+
-        '<div style="width:120px;font-size:11px;color:var(--text3);font-weight:600;flex-shrink:0">'+k+'</div>'+
+      var label=me._labelOf(k);
+      var borderClr='var(--cyan)';
+      if((k==='severity'||k==='impact'||k==='intensity')&&v){
+        if(v==='red'||v==='critical')borderClr='var(--red)';
+        else if(v==='orange'||v==='high')borderClr='var(--orange)';
+        else if(v==='yellow'||v==='medium')borderClr='var(--yellow)';
+        else borderClr='var(--green)';
+      }
+      html+='<div style="display:flex;gap:10px;padding:8px 10px;background:var(--bg2);border-radius:6px;border-left:2px solid '+borderClr+'">'+
+        '<div style="width:100px;font-size:11px;color:var(--text3);font-weight:600;flex-shrink:0">'+label+'</div>'+
         '<div style="font-size:12px;color:var(--text);flex:1;word-break:break-all">'+v+'</div></div>';
     });
     html+='</div>';
     if(this.currentTab!=='collect_logs'&&PERM.isAdmin()){
-      html+='<div style="margin-top:12px"><button class="btn danger sm" onclick="DATACENTER.deleteRow('+idx+')">🗑️ 删除此记录</button></div>';
+      html+='<div style="margin-top:12px"><button class="btn danger sm" onclick="DATACENTER.deleteRowById('+idx+');document.getElementById(\'modal\').classList.remove(\'show\')">🗑️ 删除此记录</button></div>';
     }
     document.getElementById('modal-tt').textContent='📋 数据记录详情';
     document.getElementById('modal-bd').innerHTML=html;
     document.getElementById('modal').classList.add('show');
   },
   deleteRow(idx){
-    if(!PERM.guard('\u5220\u9664\u6570\u636e\u8bb0\u5f55'))return;
-    var data=DBCenter.getAll(this.currentTab);
-    if(idx<0||idx>=data.length)return;
-    data.splice(idx,1);
-    DBCenter._w(this.currentTab,data);
+    // Legacy method
+    this.deleteRowById(idx);
+  },
+  deleteRowById(idx){
+    var allData=DBCenter.getAll(this.currentTab);
+    var filtered=this._applyFilters(allData.slice());
+    var row=filtered[idx];
+    if(!row||!row.id)return;
+    if(!PERM.guard('删除数据记录'))return;
+    allData=DBCenter.getAll(this.currentTab);
+    var realIdx=allData.findIndex(function(r){return r.id===row.id;});
+    if(realIdx<0)return;
+    allData.splice(realIdx,1);
+    DBCenter._w(this.currentTab,allData);
     DBCenter.addLog('删除'+this.currentTab+'记录: 1条');
     this.renderStats();this.renderTabs();this.renderTable();this.renderLog();this.updateBadge();
     document.getElementById('modal').classList.remove('show');
@@ -1173,6 +2165,157 @@ var DataHub={
       localStorage.removeItem('orps_dh_'+this._collections[i]);
     }
     location.reload();
+  },
+  // ===== 数据中心同步：仅同步已审核的数据到态势感知和监测中心 =====
+  syncFromDBCenter:function(){
+    var synced=0;
+    // 辅助函数：判断是否已审核（无审核状态的数据一律视为待审核，不同步）
+    var isApproved=function(item){
+      var s=item.audit_status||'pending';
+      return s==='approved';
+    };
+    // 辅助函数：判断该id是否已存在于目标数组
+    var idExists=function(arr,id){
+      var idStr=String(id);
+      for(var i=0;i<arr.length;i++){
+        if(arr[i].id&&String(arr[i].id)===idStr)return true;
+      }
+      return false;
+    };
+    // 1. 恐袭事件 → TERROR_EVENTS 和 EVENTS
+    var terrorData=DBCenter.getAll('terror_events');
+    if(terrorData&&terrorData.length){
+      var existingIds=new Set();
+      if(typeof TERROR_EVENTS!=='undefined')TERROR_EVENTS.forEach(function(e){if(e.id)existingIds.add(String(e.id));});
+      terrorData.forEach(function(t){
+        var idStr=String(t.id);
+        if(!existingIds.has(idStr)&&isApproved(t)){
+          var te={
+            id:t.id,date:t.date||t.collect_time?t.collect_time.substring(0,10):'',title:t.title||t.desc||'恐袭事件',
+            location:(t.country||'')+(t.city?'-'+t.city:''),group:t.group||'未知',type:t.type||'袭击',
+            deaths:t.deaths||0,injured:t.injured||0,desc:t.desc||'',source:t.source||'数据中心采集',
+            data_type:'terror',_fromDBCenter:true
+          };
+          if(typeof TERROR_EVENTS!=='undefined')TERROR_EVENTS.push(te);
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:'dc-terror-'+t.id,date:te.date,country:t.country||'',title:te.title,
+              type:'security',severity:Number(t.deaths)>5?'critical':Number(t.deaths)>0?'high':'medium',
+              desc:t.desc||'',status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // 2. 涉华安全事件 → CHINA_SECURITY 和 EVENTS
+    var secData=DBCenter.getAll('security_events');
+    if(secData&&secData.length){
+      var existingIds=new Set();
+      if(typeof CHINA_SECURITY!=='undefined')CHINA_SECURITY.forEach(function(e){if(e.id)existingIds.add(String(e.id));});
+      secData.forEach(function(s){
+        var idStr=String(s.id);
+        if(!existingIds.has(idStr)&&isApproved(s)){
+          var se={
+            id:s.id,date:s.date||s.collect_time?String(s.collect_time).substring(0,10):'',location:(s.country||'')+(s.location?'-'+s.location:''),
+            title:s.title||s.desc||'涉华安全事件',type:s.type||'安全事件',severity:s.severity||'yellow',
+            deaths:s.deaths||0,injured:s.injured||0,desc:s.desc||'',source:s.source||'数据中心采集',
+            data_type:'china_security',_fromDBCenter:true
+          };
+          if(typeof CHINA_SECURITY!=='undefined')CHINA_SECURITY.push(se);
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:'dc-security-'+s.id,date:se.date,country:s.country||'',title:se.title,
+              type:'security',severity:s.severity==='red'?'critical':s.severity==='orange'?'high':'medium',
+              desc:s.desc||'',status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // 3. 政治事件 → EVENTS
+    var polData=DBCenter.getAll('political_events');
+    if(polData&&polData.length){
+      var existingEvtIds=new Set();
+      if(typeof EVENTS!=='undefined')EVENTS.forEach(function(e){if(e.id)existingEvtIds.add(String(e.id));});
+      polData.forEach(function(p){
+        var idStr='dc-political-'+p.id;
+        if(p.id&&!existingEvtIds.has(idStr)&&isApproved(p)){
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:idStr,date:p.date||'',country:p.country||'',title:p.title||p.desc||'',
+              type:'political',severity:p.impact==='red'?'critical':p.impact==='orange'?'high':'medium',
+              desc:p.desc||'',status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // 4. 军事冲突 → EVENTS
+    var milData=DBCenter.getAll('military_conflicts');
+    if(milData&&milData.length){
+      var existingEvtIds2=new Set();
+      if(typeof EVENTS!=='undefined')EVENTS.forEach(function(e){if(e.id)existingEvtIds2.add(String(e.id));});
+      milData.forEach(function(m){
+        var idStr='dc-military-'+m.id;
+        if(m.id&&!existingEvtIds2.has(idStr)&&isApproved(m)){
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:idStr,date:m.date||'',country:m.country||'',title:m.title||m.desc||'',
+              type:'security',severity:'high',desc:m.desc||'',status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // 5. 自然灾害 → EVENTS
+    var disData=DBCenter.getAll('natural_disasters');
+    if(disData&&disData.length){
+      var existingEvtIds3=new Set();
+      if(typeof EVENTS!=='undefined')EVENTS.forEach(function(e){if(e.id)existingEvtIds3.add(String(e.id));});
+      disData.forEach(function(d){
+        var idStr='dc-disaster-'+d.id;
+        if(d.id&&!existingEvtIds3.has(idStr)&&isApproved(d)){
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:idStr,date:d.date||'',country:d.country||'',title:d.title||d.desc||'',
+              type:'natural',severity:d.magnitude&&d.magnitude.indexOf('7')>=0?'critical':'high',
+              desc:d.desc||'',status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // 6. 地缘情报 → EVENTS
+    var geoData=DBCenter.getAll('geopolitical_intel');
+    if(geoData&&geoData.length){
+      var existingEvtIds4=new Set();
+      if(typeof EVENTS!=='undefined')EVENTS.forEach(function(e){if(e.id)existingEvtIds4.add(String(e.id));});
+      geoData.forEach(function(g){
+        var idStr='dc-geo-'+g.id;
+        if(g.id&&!existingEvtIds4.has(idStr)&&isApproved(g)){
+          if(typeof EVENTS!=='undefined'){
+            EVENTS.push({
+              id:idStr,date:g.date||'',country:g.country||'',title:g.title||g.desc||'',
+              type:'geopolitical',severity:g.risk_level==='red'?'critical':g.risk_level==='orange'?'high':'medium',
+              desc:(g.impact||'')+' | '+(g.desc||''),status:'active',_fromDBCenter:true
+            });
+          }
+          synced++;
+        }
+      });
+    }
+    // Save synced data to DataHub persistence
+    this.save('terror_events');
+    this.save('china_security');
+    this.save('events');
+    // Notify subscribers (SITUATION will refresh)
+    this._notify('dc-sync');
+    return synced;
   },
   // Generic export
   exportJSON(data,filename){
@@ -2081,6 +3224,35 @@ var INTELCENTER={
       var saved=localStorage.getItem('intel_geoint');
       this._geointLayers=saved?JSON.parse(saved):JSON.parse(JSON.stringify(this._defaultGeoint));
     }
+    // 同步情报中心数据到数据中心osint_intel集合
+    this._syncOsintToDBCenter();
+  },
+  // 将情报中心的开源情报同步到数据中心
+  _syncOsintToDBCenter:function(){
+    if(!this._osintResults||!this._osintResults.length)return;
+    var existing=DBCenter.getAll('osint_intel');
+    var existingIds=new Set();
+    existing.forEach(function(e){if(e._intelId)existingIds.add(e._intelId);});
+    var count=0;
+    var me=this;
+    this._osintResults.forEach(function(item){
+      var idKey=item.id||(item.source+'_'+item.time);
+      if(!existingIds.has(idKey)){
+        DBCenter.add('osint_intel',{
+          _intelId:idKey,
+          date:item.time||item.date||'',
+          country:item.country||'未知',
+          intel_type:'开源情报',
+          title:item.content||item.kw||'',
+          risk_level:item.level||(item.verified?'yellow':'orange'),
+          desc:(item.source||'')+' | '+(item.kw||''),
+          source:item.source||'情报中心',
+          verified:!!item.verified
+        });
+        count++;
+      }
+    });
+    if(count>0)DBCenter.addLog('情报中心同步: +'+count+'条开源情报数据');
   },
   _saveOsint(){localStorage.setItem('intel_osint',JSON.stringify(this._osintResults));},
   _saveAnalysis(){localStorage.setItem('intel_analysis',JSON.stringify(this._analysisResults));},
@@ -6359,7 +7531,7 @@ var SETTINGS={
     }
     if(pending.length>0){
       html+='<div style="padding:10px 14px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.3);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--orange)">\u26a0\ufe0f \u6709 '+pending.length+' \u6761\u6570\u636e\u7b49\u5f85\u60a8\u5ba1\u6838</div>';
-      var tLabel={'terror_events':'\u6050\u88ad\u4e8b\u4ef6','security_events':'\u6d89\u534e\u5b89\u5168','economic_data':'\u7ecf\u6d4e\u6570\u636e','news_articles':'\u65b0\u95fb\u8d44\u8baf','political_events':'\u653f\u6cbb\u4e8b\u4ef6','military_conflicts':'\u519b\u4e8b\u51b2\u7a81','natural_disasters':'\u81ea\u7136\u707e\u5bb3','public_health':'\u516c\u5171\u536b\u751f','diplomatic_events':'\u5916\u4ea4\u4e8b\u4ef6','sanctions_compliance':'\u5236\u88c1\u5408\u89c4','social_unrest':'\u793e\u4f1a\u52a8\u8361','infrastructure':'\u57fa\u7840\u8bbe\u65bd'};
+      var tLabel={'terror_events':'\u6050\u88ad\u4e8b\u4ef6','security_events':'\u6d89\u534e\u5b89\u5168','military_conflicts':'\u6b66\u88c5\u51b2\u7a81','political_events':'\u653f\u6cbb\u98ce\u9669','geopolitical_intel':'\u5730\u7f18\u60c5\u62a5','natural_disasters':'\u81ea\u7136\u707e\u5bb3','public_health':'\u516c\u5171\u536b\u751f','sanctions_data':'\u5236\u88c1\u5408\u89c4','social_unrest':'\u793e\u4f1a\u52a8\u8361','infrastructure':'\u57fa\u7840\u8bbe\u65bd'};
       pending.forEach(function(r,i){
         html+='<div style="padding:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">';
         html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
@@ -6463,11 +7635,18 @@ function initApp(){
   renderTicker();
   // Data status
   const ds=document.getElementById('data-update-status');
-  if(ds)ds.innerHTML='<span class="dot" style="background:var(--green)"></span>数据就绪 v6.0';
+  if(ds)ds.innerHTML='<span class="dot" style="background:var(--green)"></span>数据就绪 v20.0';
   // Init DataHub (must be before any module init)
   DataHub.init();
   // Init DB
   try{DBCenter.init();}catch(e){}
+  // Init 采集库 (独立数据库) — 内部会初始化 ENTERPRISE_DB 和 RISK_FUSION
+  try{COLLECTED_DB.init();}catch(e){}
+  // 确保企业项目库和融合引擎已初始化
+  if(typeof ENTERPRISE_DB!=='undefined'){try{ENTERPRISE_DB.init();}catch(e){}}
+  if(typeof RISK_FUSION!=='undefined'){try{RISK_FUSION.init();}catch(e){}}
+  // ---- 数据链路：禁止自动同步，必须管理员审核后手动同步 ----
+  // 初始不加载数据到态势感知/监测中心，等待管理员审核后手动一键同步
   // Subscribe SITUATION to data changes for auto-refresh
   DataHub.subscribe(function(collection){if(typeof SITUATION!=='undefined'){SITUATION._needsRefresh=true;}});
   // Init first view
@@ -6478,6 +7657,9 @@ function initApp(){
   if(badge){badge.textContent=cnt;badge.classList.toggle('zero',cnt===0);}
   // Check pending users (admin only)
   updatePendingUsersBadge();
+  // 更新数据状态指示
+  var totalDCRecords=DBCenter.getStats().total;
+  if(ds)ds.innerHTML='<span class="dot" style="background:var(--green)"></span>数据就绪 v20.0 | 数据库:'+totalDCRecords+'条';
 }
 
 // ===== DOM READY =====
@@ -6491,6 +7673,6 @@ document.addEventListener('DOMContentLoaded',function(){
 var DATA_UPDATE={
   visit:function(v){
     var ds=document.getElementById('data-update-status');
-    if(ds)ds.innerHTML='<span class="dot" style="background:var(--green)"></span>数据就绪 v6.0';
+    if(ds)ds.innerHTML='<span class="dot" style="background:var(--green)"></span>数据就绪 v20.0';
   }
 };

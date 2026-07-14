@@ -662,23 +662,44 @@ select.intel-input{cursor:pointer}
 <!-- VIEW: DATACENTER -->
 <div class="view" id="view-datacenter">
 <div class="stat-grid" id="dc-stats"></div>
-<div class="card"><div class="card-tt"><span class="ic">🗄️</span>数据库浏览</div>
+
+<!-- 全网自动采集系统面板 -->
+<div class="card" style="border:1px solid rgba(0,212,255,0.3);box-shadow:0 0 20px rgba(0,212,255,0.08)">
+<div class="card-tt"><span class="ic">🌐</span>全网海外情报采集系统 <span style="font-size:10px;color:var(--text3);font-weight:400"> — 国内源(新华网/人民网/环球网等)只搜海外新闻 + 国际源(GDELT/BBC/Reuters/USGS/WHO等)覆盖全球风险</span></div>
+<div id="dc-scraper-panel"></div>
+</div>
+
+<div class="card mt-12"><div class="card-tt"><span class="ic">🗄️</span>数据库浏览 <span style="font-size:10px;color:var(--text3);font-weight:400"> — 采集库数据经审核后转入此数据库，再同步到态势感知</span></div>
 <div class="flex gap-8 mb-12 wrap items-center">
 <div class="dc-tabs" id="dc-tabs" style="margin:0"></div>
-<input class="input" id="dc-search" placeholder="搜索..." style="width:200px;margin-left:auto">
+<input class="input" id="dc-search" placeholder="🔍 搜索..." style="width:180px;margin-left:auto" onkeyup="DATACENTER.search=this.value;DATACENTER.page=1;DATACENTER.renderTable()">
 <button class="btn sm" onclick="DATACENTER.exportCSV()">📄 导出CSV</button>
 <button class="btn sm" onclick="DATACENTER.refresh()">🔄 刷新</button>
 </div>
-<div class="table-wrap" style="max-height:400px;overflow-y:auto"><table><thead id="dc-thead"></thead><tbody id="dc-tbody"></tbody></table></div>
+<div id="dc-audit-bar"></div>
+<div id="dc-filters" style="margin-bottom:10px"></div>
+<div class="table-wrap" style="max-height:450px;overflow-y:auto"><table><thead id="dc-thead"></thead><tbody id="dc-tbody"></tbody></table></div>
 <div class="flex items-center justify-between mt-12" id="dc-pagination"></div>
 </div>
-<div class="card mt-12"><div class="card-tt"><span class="ic">📡</span>数据采集</div>
-<div class="grid" style="grid-template-columns:1fr 1fr">
-<div><div class="text-sm text-muted mb-8">自动采集</div><div id="dc-auto-config"></div></div>
-<div><div class="text-sm text-muted mb-8">手动采集</div><div id="dc-manual-config"></div></div>
+
+<!-- 中资企业海外项目库 -->
+<div class="card mt-12" style="border:1px solid rgba(0,200,83,0.3)">
+<div class="card-tt"><span class="ic">🏢</span>中资企业海外项目库 <span style="font-size:10px;color:var(--text3);font-weight:400"> — 一带一路重大项目/中资企业海外资产，风险融合引擎的底座</span></div>
+<div id="dc-enterprise-panel"></div>
 </div>
-<div id="dc-log" class="mt-12" style="max-height:150px;overflow-y:auto"></div>
+
+<!-- 风险融合引擎 -->
+<div class="card mt-12" style="border:1px solid rgba(255,61,127,0.3)">
+<div class="card-tt"><span class="ic">🔗</span>风险融合引擎 <span style="font-size:10px;color:var(--text3);font-weight:400"> — 海外风险事件 ↔ 中资企业海外项目 自动匹配，生成项目级预警</span></div>
+<div id="dc-fusion-panel"></div>
 </div>
+
+<!-- 采集库 (独立数据库) -->
+<div class="card mt-12" style="border:1px solid rgba(255,170,0,0.3)">
+<div class="card-tt"><span class="ic">📥</span>采集库 (独立数据库) <span style="font-size:10px;color:var(--text3);font-weight:400"> — 全网采集的数据独立存储在此，审核通过后转入上方主数据库</span></div>
+<div id="dc-collected-panel"></div>
+</div>
+
 <div class="card mt-12"><div class="card-tt"><span class="ic">✏️</span>手动数据录入</div>
 <div id="dc-manual-form"></div>
 </div>
@@ -702,6 +723,7 @@ select.intel-input{cursor:pointer}
 <!-- TOAST -->
 <div id="toast"></div>
 
-<script src="app.js?v=25"></script>
+<script src="scraper.js?v=31"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>

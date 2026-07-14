@@ -5376,7 +5376,7 @@ const MONITOR={
       // 区域
       '<select style="font-size:11px;padding:3px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text1)" onchange="MONITOR._setThreatFilter(\'region\',this.value)">'+
         '<option value="all"'+(f.region==='all'?' selected':'')+'>所有区域</option>'+
-        ['巴基斯坦','阿富汗','缅甸','也门','索马里','尼日利亚','苏丹','墨西哥','菲律宾','叙利亚','伊朗','美国','英国','德国','日本','巴西','东南亚','中东','非洲','南亚','中亚','南美','欧洲','北美'].map(function(r){return '<option value="'+r+'"'+(f.region===r?' selected':'')+'>'+r+'</option>';}).join('')+
+        ['巴基斯坦','阿富汗','缅甸','也门','索马里','尼日利亚','苏丹','墨西哥','菲律宾','叙利亚','伊朗','美国','英国','德国','日本','巴西','印度','哥伦比亚','刚果','莫桑比克','土耳其','印度尼西亚','委内瑞拉','海地','加沙','东南亚','中东','非洲','南亚','中亚','南美','欧洲','北美','澳大利亚'].map(function(r){return '<option value="'+r+'"'+(f.region===r?' selected':'')+'>'+r+'</option>';}).join('')+
       '</select>'+
       // 搜索
       '<input type="text" placeholder="搜索组织名称/别名..." value="'+f.keyword+'" style="font-size:11px;padding:3px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text1);width:180px" onkeyup="MONITOR._setThreatFilter(\'keyword\',this.value)"/>'+

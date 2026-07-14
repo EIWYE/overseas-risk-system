@@ -2739,11 +2739,19 @@ const VIEW_MAP={
 // ===== AUTH =====
 const AUTH={
   user:null,
+  _DEFAULT_ADMIN:{user:'admin',pass:'admin123'},
   init(){
+    // 预注入默认管理员账号 (admin/admin123)
+    if(!localStorage.getItem('orps_acct_admin')){
+      localStorage.setItem('orps_acct_admin',JSON.stringify({
+        user:'admin',pass:'admin123',status:'approved',role:'admin',
+        regTime:new Date().toLocaleString('zh-CN'),isDefault:true
+      }));
+    }
     const u=localStorage.getItem('orps_user');
     if(u){try{this.user=JSON.parse(u);this.showApp();return;}catch(e){}}
-    // First-run check: if no accounts exist, show admin setup
-    if(AUTH._countAccounts()===0){this.showSetup();}else{this.showLogin();}
+    // 如果除了默认admin外没有其他账号，显示登录页（admin/admin123可用）
+    this.showLogin();
     this.startLoginAnim();
   },
   _countAccounts(){

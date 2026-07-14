@@ -1259,8 +1259,33 @@ const AUTH={
   user:null,
   init(){
     const u=localStorage.getItem('orps_user');
-    if(u){try{this.user=JSON.parse(u);this.showApp();}catch(e){}}
+    if(u){try{this.user=JSON.parse(u);this.showApp();return;}catch(e){}}
+    // First-run check: if no accounts exist, show admin setup
+    if(AUTH._countAccounts()===0){this.showSetup();}else{this.showLogin();}
     this.startLoginAnim();
+  },
+  _countAccounts(){
+    var n=0;
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k&&k.indexOf('orps_acct_')===0)n++;
+    }
+    return n;
+  },
+  showSetup(){document.getElementById('auth-card-login').style.display='none';document.getElementById('auth-card-register').style.display='none';document.getElementById('auth-card-setup').style.display='block';},
+  setupAdmin(){
+    const u=document.getElementById('su-user').value.trim();
+    const p=document.getElementById('su-pass').value.trim();
+    const p2=document.getElementById('su-pass2').value.trim();
+    if(!u||!p){showToast('请填写用户名和密码');return;}
+    if(p.length<6){showToast('密码至少6位');return;}
+    if(p!==p2){showToast('两次密码不一致');return;}
+    var now=new Date().toLocaleString('zh-CN');
+    localStorage.setItem('orps_acct_'+u,JSON.stringify({user:u,pass:p,status:'approved',role:'admin',regTime:now}));
+    this.user={name:u,pass:p,role:'admin'};
+    localStorage.setItem('orps_user',JSON.stringify(this.user));
+    showToast('✅ 管理员账号创建成功！请牢记您的密码');
+    this.showApp();
   },
   _animRAF:null,
   startLoginAnim(){
@@ -1336,17 +1361,14 @@ const AUTH={
     const p=document.getElementById('li-pass').value.trim();
     if(!u||!p){showToast('请输入用户名和密码');return;}
     const stored=localStorage.getItem('orps_acct_'+u);
-    if(stored){
-      const acct=JSON.parse(stored);
-      if(acct.pass!==p){showToast('密码错误');return;}
-      if(acct.status==='pending'){showToast('账号待审批，请联系管理员授权');return;}
-      if(acct.status==='rejected'){showToast('账号已被拒绝，请联系管理员');return;}
-      if(acct.status==='disabled'){showToast('账号已被停用，请联系管理员');return;}
-      if(acct.status!=='approved'){showToast('账号状态异常，请联系管理员');return;}
-    }else{
-      if(u==='admin'&&p==='admin123'){}else{showToast('账号不存在');return;}
-    }
-    this.user={name:u,pass:p,role:(u==='admin')?'admin':(stored?JSON.parse(stored).role||'user':'user')};
+    if(!stored){showToast('账号不存在，请先注册或联系管理员');return;}
+    const acct=JSON.parse(stored);
+    if(acct.pass!==p){showToast('密码错误');return;}
+    if(acct.status==='pending'){showToast('账号待审批，请联系管理员授权');return;}
+    if(acct.status==='rejected'){showToast('账号已被拒绝，请联系管理员');return;}
+    if(acct.status==='disabled'){showToast('账号已被停用，请联系管理员');return;}
+    if(acct.status!=='approved'){showToast('账号状态异常，请联系管理员');return;}
+    this.user={name:u,pass:p,role:acct.role||'user'};
     localStorage.setItem('orps_user',JSON.stringify(this.user));
     this.showApp();
   },
@@ -6215,7 +6237,6 @@ var SETTINGS={
         try{var acct=JSON.parse(localStorage.getItem(key));acct._key=key;users.push(acct);}catch(e){}
       }
     }
-    users.unshift({user:'admin',pass:'admin123',status:'approved',role:'admin',regTime:'\u7cfb\u7edf\u5185\u7f6e',_key:'__admin__'});
     return users;
   },
   _renderUserMgr(){
@@ -6306,8 +6327,15 @@ var SETTINGS={
   },
   deleteUser(name){
     if(!PERM.guard('\u5220\u9664\u7528\u6237'))return;
+    if(AUTH.user&&AUTH.user.name===name){showToast('\u4e0d\u80fd\u5220\u9664\u5f53\u524d\u767b\u5f55\u8d26\u53f7');return;}
     var stored=localStorage.getItem('orps_acct_'+name);
     if(!stored){showToast('\u8d26\u53f7\u4e0d\u5b58\u5728');return;}
+    var target=JSON.parse(stored);
+    if(target.role==='admin'){
+      var allUsers=this._getAllUsers();
+      var adminCount=allUsers.filter(function(u){return u.role==='admin'&&u.status==='approved';}).length;
+      if(adminCount<=1){showToast('\u4e0d\u80fd\u5220\u9664\u552f\u4e00\u7684\u7ba1\u7406\u5458\u8d26\u53f7\uff0c\u8bf7\u5148\u521b\u5efa\u5176\u4ed6\u7ba1\u7406\u5458');return;}
+    }
     showConfirm('\u786e\u5b9a\u5220\u9664\u7528\u6237 "'+name+'" \uff1f\u5220\u9664\u540e\u8be5\u7528\u6237\u9700\u91cd\u65b0\u6ce8\u518c\u3002',function(){
       localStorage.removeItem('orps_acct_'+name);
       showToast('\u{1F5D1}\ufe0f \u5df2\u5220\u9664\u7528\u6237: '+name);
@@ -6456,7 +6484,7 @@ function initApp(){
 document.addEventListener('DOMContentLoaded',function(){
   AUTH.init();
   // Enter key
-  document.addEventListener('keydown',e=>{if(e.key==='Enter'){const ov=document.getElementById('auth-overlay');if(ov&&ov.style.display!=='none'){if(document.getElementById('auth-card-login').style.display!=='none')AUTH.login();else AUTH.register();}}});
+  document.addEventListener('keydown',e=>{if(e.key==='Enter'){const ov=document.getElementById('auth-overlay');if(ov&&ov.style.display!=='none'){if(document.getElementById('auth-card-setup').style.display!=='none')AUTH.setupAdmin();else if(document.getElementById('auth-card-login').style.display!=='none')AUTH.login();else AUTH.register();}}});
 });
 
 // ===== DATA UPDATE STATUS =====

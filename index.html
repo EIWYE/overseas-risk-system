@@ -433,8 +433,8 @@ select.intel-input{cursor:pointer}
 <div class="auth-card">
 <div id="auth-card-login">
 <h3>🔐 安全登录</h3>
-<input class="auth-input" id="li-user" placeholder="用户名" value="admin">
-<input class="auth-input" id="li-pass" type="password" placeholder="密码" value="admin123">
+<input class="auth-input" id="li-user" placeholder="用户名">
+<input class="auth-input" id="li-pass" type="password" placeholder="密码">
 <button class="auth-btn" onclick="AUTH.login()">登 录</button>
 <div class="auth-switch">没有账号？<a onclick="AUTH.showReg()">注册</a></div>
 </div>
@@ -446,6 +446,14 @@ select.intel-input{cursor:pointer}
 <button class="auth-btn" onclick="AUTH.register()">注 册</button>
 <div class="auth-demo" style="color:var(--orange)">⚠️ 注册后需管理员审批方可登录</div>
 <div class="auth-switch">已有账号？<a onclick="AUTH.showLogin()">登录</a></div>
+</div>
+<div id="auth-card-setup" style="display:none">
+<h3>⚙️ 首次设置 — 创建管理员账号</h3>
+<div class="auth-demo" style="color:var(--orange);margin-bottom:12px">⚠️ 系统首次启动，请设置管理员账号和密码</div>
+<input class="auth-input" id="su-user" placeholder="管理员用户名">
+<input class="auth-input" id="su-pass" type="password" placeholder="设置密码（至少6位）">
+<input class="auth-input" id="su-pass2" type="password" placeholder="确认密码">
+<button class="auth-btn" onclick="AUTH.setupAdmin()" style="background:var(--orange);border-color:var(--orange)">创建管理员</button>
 </div>
 </div>
 </div>

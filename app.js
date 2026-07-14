@@ -5019,7 +5019,7 @@ function showSitEvents(){
 // ===== MONITOR VIEW (Map + Countries + Events + Chokepoints + Corridors) =====
 const MONITOR={
   tab:'map',
-  switch(t){this.tab=t;document.querySelectorAll('#mon-tabs .dc-tab').forEach((e,i)=>{e.classList.toggle('active',['map','countries','events','chokepoints','corridors'][i]===t);});this.render();},
+  switch(t){this.tab=t;document.querySelectorAll('#mon-tabs .dc-tab').forEach((e,i)=>{e.classList.toggle('active',['map','countries','events','chokepoints','corridors','threats'][i]===t);});this.render();},
   init(){this.switch('map');},
   render(){
     const el=document.getElementById('mon-content');
@@ -5028,6 +5028,7 @@ const MONITOR={
     else if(this.tab==='events')this.renderEvents(el);
     else if(this.tab==='chokepoints')this.renderChokepoints(el);
     else if(this.tab==='corridors')this.renderCorridors(el);
+    else if(this.tab==='threats')this.renderThreatOrgs(el);
   },
   _mapLayer:'risk',
   renderMap(el){
@@ -5300,6 +5301,254 @@ const MONITOR={
       }).join('')+'</div></div>'+
       '<div class="card"><div class="card-tt"><span class="ic">📊</span>走廊安全态势</div><div id="cor-summary"></div></div></div>';
     this._renderCorSummary();
+  },
+
+  // ===== 威胁组织板块 =====
+  _threatFilter:{category:'all',level:'all',region:'all',keyword:''},
+  renderThreatOrgs(el){
+    if(typeof THREAT_ORGS_DB==='undefined'){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--text3)">⚠️ 威胁组织数据库未加载</div>';return;}
+    var stats=THREAT_ORGS_DB.getStats();
+    var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+    var levelLabels={critical:'🔴 极高',high:'🟠 高',medium:'🟡 中',low:'🟢 低'};
+    var catLabels={'terrorist':'恐怖组织','criminal':'犯罪组织','anti_china_ngo':'反华NGO'};
+    var catIcons={'terrorist':'💥','criminal':'🔫','anti_china_ngo':'📢'};
+    var catColors={'terrorist':'var(--red)','criminal':'var(--orange)','anti_china_ngo':'var(--purple)'};
+
+    // 筛选
+    var orgs=stats.orgs;
+    var f=this._threatFilter;
+    if(f.category!=='all')orgs=orgs.filter(function(o){return o.category===f.category;});
+    if(f.level!=='all')orgs=orgs.filter(function(o){return o.threat_level===f.level;});
+    if(f.region!=='all')orgs=orgs.filter(function(o){return o.active_regions.some(function(r){return r.indexOf(f.region)>=0;});});
+    if(f.keyword){var kw=f.keyword.toLowerCase();orgs=orgs.filter(function(o){return o.name.toLowerCase().indexOf(kw)>=0||(o.aliases||[]).some(function(a){return a.toLowerCase().indexOf(kw)>=0;})||(o.background||'').toLowerCase().indexOf(kw)>=0;});}
+
+    // 概览统计
+    var overviewHtml='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+      // 总数
+      '<div style="padding:10px 16px;background:rgba(0,212,255,0.08);border-radius:8px;border:1px solid rgba(0,212,255,0.2);min-width:120px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--cyan)">'+stats.total+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">威胁组织总数</div>'+
+      '</div>'+
+      // 三类
+      Object.keys(catLabels).map(function(cat){
+        var count=stats.byCategory[cat]||0;
+        var color=catColors[cat];
+        return '<div style="padding:10px 16px;background:'+color+'10;border-radius:8px;border:1px solid '+color+'30;min-width:120px;cursor:pointer" onclick="MONITOR._setThreatFilter(\'category\',\''+(f.category===cat?'all':cat)+'\')">'+
+          '<div style="font-size:22px;font-weight:700;color:'+color+'">'+count+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">'+catIcons[cat]+' '+catLabels[cat]+(f.category===cat?' ✓':'')+'</div>'+
+        '</div>';
+      }).join('')+
+      // 袭击/反华事件/言论
+      '<div style="padding:10px 16px;background:rgba(255,61,127,0.08);border-radius:8px;border:1px solid rgba(255,61,127,0.2);min-width:120px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--pink)">'+stats.totalAttacks+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">袭击事件记录</div>'+
+      '</div>'+
+      '<div style="padding:10px 16px;background:rgba(255,170,0,0.08);border-radius:8px;border:1px solid rgba(255,170,0,0.2);min-width:120px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--orange)">'+stats.totalAntiChina+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">反华事件记录</div>'+
+      '</div>'+
+      '<div style="padding:10px 16px;background:rgba(124,58,237,0.08);border-radius:8px;border:1px solid rgba(124,58,237,0.2);min-width:120px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--purple)">'+stats.totalStatements+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">威胁言论记录</div>'+
+      '</div>'+
+      '<div style="padding:10px 16px;background:rgba(0,200,83,0.08);border-radius:8px;border:1px solid rgba(0,200,83,0.2);min-width:120px">'+
+        '<div style="font-size:22px;font-weight:700;color:var(--green)">'+stats.regionCount+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">活动区域数</div>'+
+      '</div>'+
+    '</div>';
+
+    // 筛选栏
+    var filterHtml='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:var(--bg2);border-radius:8px;margin-bottom:12px">'+
+      '<span style="font-size:11px;color:var(--text3);font-weight:600">🔍 筛选:</span>'+
+      // 威胁等级
+      '<select style="font-size:11px;padding:3px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text1)" onchange="MONITOR._setThreatFilter(\'level\',this.value)">'+
+        '<option value="all"'+(f.level==='all'?' selected':'')+'>所有等级</option>'+
+        ['critical','high','medium','low'].map(function(lv){return '<option value="'+lv+'"'+(f.level===lv?' selected':'')+'>'+levelLabels[lv]+'</option>';}).join('')+
+      '</select>'+
+      // 区域
+      '<select style="font-size:11px;padding:3px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text1)" onchange="MONITOR._setThreatFilter(\'region\',this.value)">'+
+        '<option value="all"'+(f.region==='all'?' selected':'')+'>所有区域</option>'+
+        ['巴基斯坦','阿富汗','缅甸','也门','索马里','尼日利亚','苏丹','墨西哥','菲律宾','叙利亚','伊朗','美国','英国','德国','日本','巴西','东南亚','中东','非洲','南亚','中亚','南美','欧洲','北美'].map(function(r){return '<option value="'+r+'"'+(f.region===r?' selected':'')+'>'+r+'</option>';}).join('')+
+      '</select>'+
+      // 搜索
+      '<input type="text" placeholder="搜索组织名称/别名..." value="'+f.keyword+'" style="font-size:11px;padding:3px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text1);width:180px" onkeyup="MONITOR._setThreatFilter(\'keyword\',this.value)"/>'+
+      '<span style="font-size:11px;color:var(--text3);margin-left:auto">显示 '+orgs.length+'/'+stats.total+' 个组织</span>'+
+      '<button class="btn sm" style="font-size:10px;padding:2px 8px" onclick="MONITOR._setThreatFilter(\'category\',\'all\');MONITOR._setThreatFilter(\'level\',\'all\');MONITOR._setThreatFilter(\'region\',\'all\');MONITOR._setThreatFilter(\'keyword\',\'\')">重置</button>'+
+    '</div>';
+
+    // 组织列表
+    var listHtml='';
+    if(orgs.length===0){
+      listHtml='<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px"><div style="font-size:36px;margin-bottom:8px">🔍</div>未找到匹配的威胁组织</div>';
+    }else{
+      listHtml='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;max-height:550px;overflow-y:auto;padding-right:4px">'+
+        orgs.map(function(o){
+          var lc=levelColors[o.threat_level]||'var(--text3)';
+          var ll=levelLabels[o.threat_level]||'';
+          var cc=catColors[o.category]||'var(--text3)';
+          var ci=catIcons[o.category]||'';
+          var cl=catLabels[o.category]||o.category;
+          var aliases=(o.aliases||[]).slice(0,3).join(' / ');
+          var attackCount=(o.attacks||[]).length;
+          var antiChinaCount=(o.anti_china_events||[]).length;
+          var stmtCount=(o.statements||[]).length;
+          var regions=(o.active_regions||[]).slice(0,3).join('、');
+          if((o.active_regions||[]).length>3)regions+='等'+o.active_regions.length+'个区域';
+          return '<div onclick="MONITOR.showThreatOrgDetail(\''+o.id+'\')" style="padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:.2s;position:relative" onmouseover="this.style.borderColor=\''+lc+'\';this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 4px 12px '+lc+'20\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.transform=\'\';this.style.boxShadow=\'\'">'+
+            // 左侧色条
+            '<div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:'+lc+';border-radius:10px 0 0 10px"></div>'+
+            // 标题
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding-left:8px">'+
+              '<div style="display:flex;align-items:center;gap:6px">'+
+                '<span style="font-size:16px">'+ci+'</span>'+
+                '<span style="font-size:13px;font-weight:700;color:var(--text1)">'+o.name+'</span>'+
+              '</div>'+
+              '<span style="font-size:10px;font-weight:700;color:'+lc+';background:'+lc+'15;padding:2px 8px;border-radius:4px">'+ll+'</span>'+
+            '</div>'+
+            // 别名
+            (aliases?'<div style="font-size:10px;color:var(--text3);margin-bottom:6px;padding-left:8px">aka: '+aliases+'</div>':'')+
+            // 背景
+            '<div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:8px;padding-left:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(o.background||'').substring(0,120)+'...</div>'+
+            // 活动区域
+            '<div style="font-size:10px;color:var(--text3);margin-bottom:8px;padding-left:8px">📍 '+regions+'</div>'+
+            // 统计
+            '<div style="display:flex;gap:8px;padding-left:8px">'+
+              '<span style="font-size:10px;padding:2px 6px;background:rgba(255,61,127,0.1);color:var(--pink);border-radius:4px">💥 袭击 '+attackCount+'</span>'+
+              '<span style="font-size:10px;padding:2px 6px;background:rgba(255,170,0,0.1);color:var(--orange);border-radius:4px">🇨🇳 反华 '+antiChinaCount+'</span>'+
+              '<span style="font-size:10px;padding:2px 6px;background:rgba(124,58,237,0.1);color:var(--purple);border-radius:4px">📢 言论 '+stmtCount+'</span>'+
+              '<span style="font-size:10px;padding:2px 6px;background:'+cc+'15;color:'+cc+';border-radius:4px;margin-left:auto">'+cl+'</span>'+
+            '</div>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+    }
+
+    el.innerHTML='<div style="padding:16px">'+
+      // 标题栏
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'+
+        '<span style="font-size:18px">🎯</span>'+
+        '<span style="font-size:14px;font-weight:700;color:var(--text1)">威胁组织数据库</span>'+
+        '<span style="font-size:10px;padding:2px 8px;background:rgba(255,170,0,0.15);color:var(--orange);border-radius:4px;font-weight:600">模拟数据</span>'+
+        '<span style="font-size:10px;color:var(--text3)">涵盖恐怖组织、犯罪组织、反华非政府组织</span>'+
+        (PERM.isAdmin()?'<button class="btn sm" style="font-size:10px;padding:2px 10px;margin-left:auto" onclick="MONITOR._reloadThreatData()">🔄 重新加载</button>':'')+
+      '</div>'+
+      overviewHtml+
+      filterHtml+
+      listHtml+
+    '</div>';
+  },
+
+  _setThreatFilter(key,val){
+    this._threatFilter[key]=val;
+    this.renderThreatOrgs(document.getElementById('mon-content'));
+  },
+
+  _reloadThreatData(){
+    if(typeof THREAT_ORGS_DB==='undefined')return;
+    showConfirm('确认重新加载威胁组织模拟数据？这将清除当前数据并重新注入。',function(){
+      THREAT_ORGS_DB.clearSimulated();
+      THREAT_ORGS_DB.init();
+      MONITOR.renderThreatOrgs(document.getElementById('mon-content'));
+      showToast('✅ 威胁组织数据已重新加载');
+    });
+  },
+
+  showThreatOrgDetail(id){
+    if(typeof THREAT_ORGS_DB==='undefined')return;
+    var org=THREAT_ORGS_DB.getById(id);
+    if(!org)return;
+    var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+    var levelLabels={critical:'🔴 极高威胁',high:'🟠 高威胁',medium:'🟡 中等威胁',low:'🟢 低威胁'};
+    var catLabels={'terrorist':'恐怖组织','criminal':'犯罪组织','anti_china_ngo':'反华非政府组织'};
+    var catIcons={'terrorist':'💥','criminal':'🔫','anti_china_ngo':'📢'};
+    var lc=levelColors[org.threat_level]||'var(--text3)';
+
+    var html='<div style="padding:0;max-height:75vh;overflow-y:auto">';
+
+    // 头部
+    html+='<div style="padding:16px 20px;background:linear-gradient(135deg,'+lc+'18,'+lc+'05);border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+        '<span style="font-size:28px">'+(catIcons[org.category]||'🎯')+'</span>'+
+        '<div>'+
+          '<div style="font-size:16px;font-weight:700;color:var(--text1)">'+org.name+'</div>'+
+          '<div style="font-size:11px;color:var(--text3)">'+(org.aliases||[]).join(' / ')+'</div>'+
+        '</div>'+
+        '<div style="margin-left:auto;display:flex;gap:6px">'+
+          '<span style="font-size:11px;font-weight:700;color:'+lc+';background:'+lc+'15;padding:4px 12px;border-radius:6px">'+(levelLabels[org.threat_level]||org.threat_level)+'</span>'+
+          '<span style="font-size:11px;color:var(--cyan);background:rgba(0,212,255,0.1);padding:4px 12px;border-radius:6px">'+(catLabels[org.category]||org.category)+'</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
+    // 基本信息
+    html+='<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+      '<div style="font-size:12px;font-weight:700;color:var(--text1);margin-bottom:10px">📋 组织基本情况</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">'+
+        '<div style="font-size:11px"><span style="color:var(--text3)">总部:</span> <b>'+org.headquarters+'</b></div>'+
+        '<div style="font-size:11px"><span style="color:var(--text3)">成立时间:</span> <b>'+(org.founded||'未知')+'</b></div>'+
+        '<div style="font-size:11px"><span style="color:var(--text3)">人员规模:</span> <b>'+(org.personnel_size||'未知')+'</b></div>'+
+        '<div style="font-size:11px"><span style="color:var(--text3)">领导层:</span> <b>'+(org.leadership||'未知')+'</b></div>'+
+      '</div>'+
+      (org.ideology?'<div style="font-size:11px;margin-top:8px"><span style="color:var(--text3)">意识形态:</span> '+org.ideology+'</div>':'')+
+      '<div style="font-size:11px;margin-top:8px"><span style="color:var(--text3)">活动区域:</span> '+(org.active_regions||[]).join('、')+'</div>'+
+      '<div style="font-size:11px;margin-top:8px"><span style="color:var(--text3)">资金来源:</span> '+(org.funding_sources||[]).join('、')+'</div>'+
+      '<div style="font-size:11px;margin-top:10px;padding:10px;background:var(--bg2);border-radius:6px;line-height:1.6">'+(org.background||'无背景信息')+'</div>'+
+    '</div>';
+
+    // 袭击事件
+    if(org.attacks&&org.attacks.length>0){
+      html+='<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--pink);margin-bottom:10px">💥 袭击事件记录 ('+org.attacks.length+')</div>'+
+        org.attacks.map(function(a){
+          return '<div style="padding:10px;background:rgba(255,61,127,0.05);border-left:3px solid var(--pink);border-radius:0 6px 6px 0;margin-bottom:8px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+              '<span style="font-size:11px;font-weight:700;color:var(--text1)">'+a.type+'</span>'+
+              '<span style="font-size:10px;color:var(--text3)">'+a.date+'</span>'+
+            '</div>'+
+            '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 '+a.location+'</div>'+
+            (a.casualties?'<div style="font-size:10px;color:var(--red);font-weight:600">☠ 伤亡: '+a.casualties+'</div>':'')+
+            '<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5">'+a.description+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+    }
+
+    // 反华事件
+    if(org.anti_china_events&&org.anti_china_events.length>0){
+      html+='<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:10px">🇨🇳 反华事件记录 ('+org.anti_china_events.length+')</div>'+
+        org.anti_china_events.map(function(e){
+          return '<div style="padding:10px;background:rgba(255,170,0,0.05);border-left:3px solid var(--orange);border-radius:0 6px 6px 0;margin-bottom:8px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+              '<span style="font-size:11px;font-weight:700;color:var(--text1)">'+e.type+'</span>'+
+              '<span style="font-size:10px;color:var(--text3)">'+e.date+'</span>'+
+            '</div>'+
+            '<div style="font-size:11px;color:var(--text2);line-height:1.5">'+e.description+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+    }
+
+    // 威胁言论
+    if(org.statements&&org.statements.length>0){
+      html+='<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--purple);margin-bottom:10px">📢 威胁言论记录 ('+org.statements.length+')</div>'+
+        org.statements.map(function(s){
+          var natureColor=s.nature==='直接威胁'?'var(--red)':s.nature==='袭击认领'?'var(--pink)':s.nature==='煽动分裂'?'var(--orange)':s.nature==='煽动制裁'?'var(--yellow)':'var(--text3)';
+          return '<div style="padding:10px;background:rgba(124,58,237,0.05);border-left:3px solid var(--purple);border-radius:0 6px 6px 0;margin-bottom:8px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+              '<span style="font-size:11px;font-weight:600;color:var(--text1)">'+s.speaker+'</span>'+
+              '<span style="font-size:10px;color:'+natureColor+';font-weight:600;background:'+natureColor+'15;padding:1px 6px;border-radius:3px">'+s.nature+'</span>'+
+            '</div>'+
+            '<div style="font-size:11px;color:var(--text2);line-height:1.6;font-style:italic;margin-bottom:4px">"'+s.content+'"</div>'+
+            '<div style="font-size:10px;color:var(--text3)">来源: '+s.source+' | '+s.date+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+    }
+
+    html+='</div>';
+    showModal('威胁组织详情',html);
   },
 
   // === MONITOR CRUD ===

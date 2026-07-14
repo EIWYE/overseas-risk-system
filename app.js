@@ -2857,8 +2857,20 @@ const AUTH={
     if(acct.status==='pending'){showToast('账号待审批，请联系管理员授权');return;}
     if(acct.status==='rejected'){showToast('账号已被拒绝，请联系管理员');return;}
     if(acct.status==='disabled'){showToast('账号已被停用，请联系管理员');return;}
+    if(acct.status==='expired'){showToast('试用账号已过期，请联系管理员续期');return;}
     if(acct.status!=='approved'){showToast('账号状态异常，请联系管理员');return;}
-    this.user={name:u,pass:p,role:acct.role||'user'};
+    // 试用账号到期检查
+    if(acct.isTrial&&acct.expireTime){
+      var now=new Date().getTime();
+      var expire=new Date(acct.expireTime).getTime();
+      if(now>expire){
+        acct.status='expired';
+        localStorage.setItem('orps_acct_'+u,JSON.stringify(acct));
+        showToast('试用账号已过期，请联系管理员续期');
+        return;
+      }
+    }
+    this.user={name:u,pass:p,role:acct.role||'user',isTrial:acct.isTrial||false,expireTime:acct.expireTime||null};
     localStorage.setItem('orps_user',JSON.stringify(this.user));
     this.showApp();
   },
@@ -2885,9 +2897,72 @@ const AUTH={
     document.getElementById('tb-username').textContent=this.user.name;
     var roleEl=document.getElementById('tb-userrole');
     if(roleEl){if(this.user.role==='admin'){roleEl.style.display='inline-block';}else{roleEl.style.display='none';}}
+    // 试用账号到期提醒
+    var trialInfo=this.checkTrialStatus();
+    if(trialInfo){
+      var trialBadge=document.getElementById('tb-pending-users');
+      if(trialBadge){
+        trialBadge.style.display='block';
+        trialBadge.style.background='rgba(0,212,255,0.12)';
+        trialBadge.style.border='1px solid rgba(0,212,255,0.3)';
+        trialBadge.style.color='var(--cyan)';
+        trialBadge.textContent='\u{1F3DB}\uFE0F \u8bd5\u7528\u8d26\u53f7 \u5269'+trialInfo.remain+'\u5929';
+        trialBadge.title='\u5230\u671f\u65f6\u95f4: '+trialInfo.expireTime;
+        trialBadge.onclick=function(){navigateTo('settings');};
+      }
+      if(trialInfo.remain<=3){
+        showToast('\u26a0\ufe0f \u8bd5\u7528\u8d26\u53f7\u5c06\u4e8e '+trialInfo.remain+' \u5929\u540e\u5230\u671f\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u7eed\u671f');
+      }
+    }
     initApp();
   },
-  logout(){localStorage.removeItem('orps_user');location.reload();}
+  logout(){localStorage.removeItem('orps_user');location.reload();},
+  // 创建试用账号
+  createTrialAccount(username,password,days,note){
+    if(!PERM.isAdmin()){showToast('仅管理员可创建试用账号');return false;}
+    if(!username||!password){showToast('请填写用户名和密码');return false;}
+    if(localStorage.getItem('orps_acct_'+username)){showToast('用户名已存在');return false;}
+    var now=new Date();
+    var expire=new Date(now.getTime()+days*24*60*60*1000);
+    var acct={
+      user:username,
+      pass:password,
+      status:'approved',
+      role:'user',
+      isTrial:true,
+      createTime:now.toLocaleString('zh-CN'),
+      expireTime:expire.toLocaleString('zh-CN'),
+      note:note||'',
+      regTime:now.toLocaleString('zh-CN')
+    };
+    localStorage.setItem('orps_acct_'+username,JSON.stringify(acct));
+    showToast('试用账号创建成功: '+username+' (有效期'+days+'天)');
+    return true;
+  },
+  // 续期试用账号
+  renewTrial(username,days){
+    var stored=localStorage.getItem('orps_acct_'+username);
+    if(!stored){showToast('账号不存在');return;}
+    var acct=JSON.parse(stored);
+    if(!acct.isTrial){showToast('非试用账号');return;}
+    var baseTime=acct.expireTime?new Date(acct.expireTime).getTime():new Date().getTime();
+    var now=new Date().getTime();
+    var startTime=Math.max(baseTime,now);
+    var newExpire=new Date(startTime+days*24*60*60*1000);
+    acct.expireTime=newExpire.toLocaleString('zh-CN');
+    if(acct.status==='expired')acct.status='approved';
+    localStorage.setItem('orps_acct_'+username,JSON.stringify(acct));
+    showToast('已续期 '+days+' 天，新到期时间: '+acct.expireTime);
+  },
+  // 检查当前用户试用状态
+  checkTrialStatus(){
+    if(!this.user||!this.user.isTrial)return null;
+    if(!this.user.expireTime)return null;
+    var now=new Date().getTime();
+    var expire=new Date(this.user.expireTime).getTime();
+    var remain=Math.ceil((expire-now)/(24*60*60*1000));
+    return {remain:remain,expireTime:this.user.expireTime};
+  }
 };
 
 // ===== GLOBE — Overseas Interest Protection Intelligence Globe =====
@@ -3650,7 +3725,7 @@ var INTELCENTER={
   switch(t){
     this.tab=t;
     document.querySelectorAll('#intel-tabs .dc-tab').forEach(function(el,i){
-      el.classList.toggle('active',['gallery','osint','analysis','timeline','geoint'][i]===t);
+      el.classList.toggle('active',['gallery','osint','analysis','aireport','timeline','geoint'][i]===t);
     });
     this.render();
   },
@@ -3672,6 +3747,7 @@ var INTELCENTER={
     if(this.tab==='gallery')this.renderGallery(el);
     else if(this.tab==='osint')this.renderOsint(el);
     else if(this.tab==='analysis')this.renderAnalysis(el);
+    else if(this.tab==='aireport')this.renderAiReport(el);
     else if(this.tab==='timeline')this.renderTimeline(el);
     else if(this.tab==='geoint')this.renderGeoint(el);
   },
@@ -4031,6 +4107,397 @@ var INTELCENTER={
     document.getElementById('modal-tt').textContent='\u{1F4CB} '+r.id+' \u5206\u6790\u62a5\u544a';
     document.getElementById('modal-bd').innerHTML=html;
     document.getElementById('modal').classList.add('show');
+  },
+  // ===== AI 情报分析报告 =====
+  _aiReports:null,
+  _aiReportMaterials:[],
+  _aiReportInit(){
+    if(this._aiReports===null){
+      try{var saved=localStorage.getItem('orps_ai_reports');
+      this._aiReports=saved?JSON.parse(saved):[];}catch(e){this._aiReports=[];}
+    }
+  },
+  _aiReportSave(){localStorage.setItem('orps_ai_reports',JSON.stringify(this._aiReports));},
+  renderAiReport(el){
+    this._aiReportInit();
+    if(!PERM.canUpload()){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--text3)"><div style="font-size:36px;margin-bottom:8px">🔒</div>请先登录后使用AI情报分析报告功能</div>';return;}
+    var html=this._trainLabel();
+    // 概览统计
+    var reports=this._aiReports;
+    html+='<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">';
+    var stats=[
+      {ic:'\u{1F4CB}',c:'var(--cyan)',l:'报告总数',v:reports.length},
+      {ic:'\u{1F534}',c:'var(--red)',l:'紧急报告',v:reports.filter(function(r){return r.threatLevel==='critical';}).length},
+      {ic:'\u{1F7E0}',c:'var(--orange)',l:'高危报告',v:reports.filter(function(r){return r.threatLevel==='high';}).length},
+      {ic:'\u{1F550}',c:'var(--green)',l:'本月报告',v:reports.filter(function(r){var d=new Date(r.createTime);var n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}).length}
+    ];
+    stats.forEach(function(s){
+      html+='<div class="stat-card"><div class="stat-ic" style="background:rgba(0,212,255,0.08);color:'+s.c+'">'+s.ic+'</div><div class="stat-info"><div class="stat-label">'+s.l+'</div><div class="stat-val" style="color:'+s.c+'">'+s.v+'</div></div></div>';
+    });
+    html+='</div>';
+    // 操作栏
+    html+='<div class="card"><div class="card-tt"><span class="ic">\u{1F916}</span>AI情报分析报告 <span style="font-size:10px;color:var(--text3);font-weight:400;margin-left:6px">— 现状分析(六要素) + 对华威胁 + 对策建议</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<span style="font-size:12px;color:var(--text3)">共 '+reports.length+' 份报告 | 管理员和注册用户均可使用</span>'+
+      '<button class="btn primary sm" onclick="INTELCENTER.showAiReportForm()">\u2795 新建情报分析报告</button></div>';
+    // 报告列表
+    if(reports.length===0){
+      html+='<div style="text-align:center;padding:30px;color:var(--text3)"><div style="font-size:36px;margin-bottom:8px">\u{1F4DD}</div><div style="font-size:13px;margin-bottom:4px">暂无情报分析报告</div><div style="font-size:11px">点击"新建情报分析报告"，选择系统中的案例/预警等素材，AI将自动生成结构化分析报告</div></div>';
+    }else{
+      html+='<div style="display:grid;gap:8px;max-height:500px;overflow-y:auto">';
+      reports.forEach(function(r){
+        var lvClr=r.threatLevel==='critical'?'var(--red)':r.threatLevel==='high'?'var(--orange)':r.threatLevel==='medium'?'var(--yellow)':'var(--green)';
+        var lvLabel=r.threatLevel==='critical'?'\u{1F534} 紧急':r.threatLevel==='high'?'\u{1F7E0} 高危':r.threatLevel==='medium'?'\u{1F7E1} 中危':'\u{1F7E2} 低危';
+        html+='<div style="padding:12px;background:var(--panel2);border-radius:8px;border-left:3px solid '+lvClr+';transition:.2s;cursor:pointer" onclick="INTELCENTER.showAiReportDetail(\''+r.id+'\')" onmouseover="this.style.borderColor=lvClr" onmouseout="this.style.borderColor=\'var(--border)\'">'+
+          '<div style="display:flex;justify-content:space-between;align-items:start">'+
+          '<div style="flex:1">'+
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+
+          '<span style="font-size:10px;font-weight:700;color:'+lvClr+'">'+lvLabel+'</span>'+
+          '<span style="font-size:12px;font-weight:700">['+r.id+'] '+r.title+'</span>'+
+          '</div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+(r.summary||'').substring(0,120)+(r.summary&&r.summary.length>120?'...':'')+'</div>'+
+          '<div style="display:flex;gap:10px;font-size:9px;color:var(--text3)">'+
+          '<span>\u{1F4C5} '+r.createTime+'</span>'+
+          '<span>\u{1F464} '+(r.author||'')+'</span>'+
+          '<span>\u{1F3AF} '+(r.country||'')+'</span>'+
+          '<span>\u{1F4CC} '+(r.materials?r.materials.length:0)+'个素材</span>'+
+          '</div></div>'+
+          '<div style="display:flex;flex-direction:column;gap:4px;margin-left:8px" onclick="event.stopPropagation()">'+
+          '<button class="btn sm" style="font-size:9px;padding:2px 8px;min-width:auto" onclick="INTELCENTER.exportAiReport(\''+r.id+'\')">\u{1F4E5}</button>'+
+          '<button class="btn sm" style="font-size:9px;padding:2px 8px;min-width:auto;color:var(--red)" onclick="INTELCENTER.deleteAiReport(\''+r.id+'\')">\u{1F5D1}\uFE0F</button>'+
+          '</div></div></div>';
+      });
+      html+='</div>';
+    }
+    html+='</div>';
+    el.innerHTML=html;
+  },
+  // 素材选择器 - 从系统各模块获取可选项
+  _gatherMaterials(){
+    var materials=[];
+    // 1. 预警中心
+    if(typeof ALERTS!=='undefined'){
+      ALERTS.forEach(function(a){
+        materials.push({id:'ALERT-'+a.id,source:'预警中心',title:a.title||a.target||'',country:a.country||'',date:a.time||'',severity:a.level||'',desc:a.detail||a.desc||'',type:'alert'});
+      });
+    }
+    // 2. 采集库数据
+    if(typeof COLLECTED_DB!=='undefined'){
+      COLLECTED_DB.CATEGORIES.forEach(function(cat){
+        var data=COLLECTED_DB.getAll(cat);
+        data.forEach(function(d){
+          if(d.audit_status==='approved'||d.is_simulated){
+            materials.push({id:'COL-'+cat+'-'+d.id,source:'采集库',title:d.title||d.desc||'',country:d.country||'',date:d.date||'',severity:d.severity||'',desc:(d.title||d.desc||'').substring(0,200),type:'collected',category:cat});
+          }
+        });
+      });
+    }
+    // 3. 风险融合结果
+    if(typeof RISK_FUSION!=='undefined'){
+      var fusions=RISK_FUSION.getResults();
+      fusions.forEach(function(f,idx){
+        materials.push({id:'FUSION-'+idx,source:'风险融合',title:f.event_title||'',country:f.project_country||'',date:f.event_date||'',severity:f.alert_level||'',desc:'项目:'+f.project_name+'|匹配分:'+f.match_score,type:'fusion'});
+      });
+    }
+    // 4. 威胁组织
+    if(typeof THREAT_ORGS_DB!=='undefined'){
+      var orgs=THREAT_ORGS_DB.getAll();
+      orgs.forEach(function(o){
+        materials.push({id:'THREAT-'+o.id,source:'威胁组织',title:o.name,country:o.active_regions||'',date:o.founded||'',severity:o.threat_level||'',desc:o.background||o.desc||'',type:'threat',category:o.category});
+      });
+    }
+    // 5. 企业项目
+    if(typeof ENTERPRISE_DB!=='undefined'){
+      var projects=ENTERPRISE_DB.getAll();
+      projects.forEach(function(p){
+        materials.push({id:'PROJ-'+p.id,source:'企业项目',title:p.project_name,country:p.country||'',date:'',severity:p.risk_level||'',desc:p.desc||p.desc||'',type:'project',sector:p.sector});
+      });
+    }
+    return materials;
+  },
+  _selectedMaterials:[],
+  showAiReportForm(id){
+    this._aiReportInit();
+    if(!PERM.canUpload()){showToast('\u26a0\ufe0f 请先登录');return;}
+    var r=id?this._aiReports.find(function(x){return x.id===id;}):null;
+    this._selectedMaterials=r&&r.materials?r.materials.slice():[];
+    var materials=this._gatherMaterials();
+    // 按来源分组
+    var groups={};
+    materials.forEach(function(m){if(!groups[m.source])groups[m.source]=[];groups[m.source].push(m);});
+    var html='<div style="padding:12px;background:var(--bg2);border-radius:8px;max-height:70vh;overflow-y:auto">';
+    html+='<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'+(r?'\u7f16\u8f91\u60c5\u62a5\u5206\u6790\u62a5\u544a ['+r.id+']':'\u65b0\u5efaAI\u60c5\u62a5\u5206\u6790\u62a5\u544a')+' \u2014 \u9009\u62e9\u7cfb\u7edf\u4e2d\u7684\u6848\u4f8b/\u9884\u8b66/\u5a01\u80c1\u7ec4\u7ec7\u7b49\u4f5c\u4e3a\u7d20\u6750</div>';
+    // 基本信息表单
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
+    html+='<div><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u62a5\u544a\u6807\u9898 <span style="color:var(--red)">*</span></label><input class="input" id="aireport-title" value="'+(r?r.title:'')+'" placeholder="\u5982\uff1a\u7ea2\u6d77\u822a\u8fd0\u5b89\u5168\u5f62\u52bf\u5206\u6790" style="font-size:12px;width:100%"></div>';
+    html+='<div><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u5173\u6ce8\u56fd\u5bb6/\u533a\u57df</label><input class="input" id="aireport-country" value="'+(r?r.country:'')+'" placeholder="\u5982\uff1a\u4e5f\u95e8\u3001\u7ea2\u6d77\u6cbf\u5cb8" style="font-size:12px;width:100%"></div>';
+    html+='<div><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u5a01\u80c1\u7b49\u7ea7</label><select class="select" id="aireport-level" style="font-size:12px;width:100%"><option value="critical"'+(r&&r.threatLevel==='critical'?' selected':'')+'>\u{1F534} \u7d27\u6025</option><option value="high"'+(r&&r.threatLevel==='high'?' selected':'')+'>\u{1F7E0} \u9ad8\u5371</option><option value="medium"'+(r&&r.threatLevel==='medium'?' selected':'')+'>\u{1F7E1} \u4e2d\u5371</option><option value="low"'+(r&&r.threatLevel==='low'?' selected':'')+'>\u{1F7E2} \u4f4e\u5371</option></select></div>';
+    html+='<div><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u62a5\u544a\u7c7b\u578b</label><select class="select" id="aireport-type" style="font-size:12px;width:100%"><option value="\u4e8b\u4ef6\u5206\u6790"'+(r&&r.reportType==='\u4e8b\u4ef6\u5206\u6790'?' selected':'')+'>\u4e8b\u4ef6\u5206\u6790</option><option value="\u5f62\u52bf\u8bc4\u4f30"'+(r&&r.reportType==='\u5f62\u52bf\u8bc4\u4f30'?' selected':'')+'>\u5f62\u52bf\u8bc4\u4f30</option><option value="\u98ce\u9669\u9884\u8b66"'+(r&&r.reportType==='\u98ce\u9669\u9884\u8b66'?' selected':'')+'>\u98ce\u9669\u9884\u8b66</option><option value="\u5a01\u80c1\u8bc4\u4f30"'+(r&&r.reportType==='\u5a01\u80c1\u8bc4\u4f30'?' selected':'')+'>\u5a01\u80c1\u8bc4\u4f30</option><option value="\u7efc\u5408\u60c5\u62a5"'+(r&&r.reportType==='\u7efc\u5408\u60c5\u62a5'?' selected':'')+'>\u7efc\u5408\u60c5\u62a5</option></select></div>';
+    html+='</div>';
+    // 素材选择器
+    html+='<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--cyan);margin-bottom:6px">\u{1F4CC} \u9009\u62e9\u5206\u6790\u7d20\u6750\uff08\u53ef\u4ece\u7cfb\u7edf\u5404\u6a21\u5757\u4e2d\u9009\u62e9\uff09</div>';
+    html+='<div style="max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--bg)" id="aireport-materials-list">';
+    Object.keys(groups).forEach(function(src){
+      html+='<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:var(--orange);margin-bottom:4px">'+src+' ('+groups[src].length+')</div>';
+      groups[src].forEach(function(m){
+        var isSel=INTELCENTER._selectedMaterials.some(function(s){return s.id===m.id;});
+        var sevClr=m.severity==='critical'||m.severity==='red'?'var(--red)':m.severity==='high'||m.severity==='orange'?'var(--orange)':m.severity==='medium'||m.severity==='yellow'?'var(--yellow)':'var(--text3)';
+        html+='<div style="display:flex;align-items:start;gap:6px;padding:4px 6px;margin-bottom:2px;border-radius:4px;cursor:pointer;background:'+(isSel?'rgba(0,212,255,0.08)':'transparent')+'" onclick="INTELCENTER._toggleMaterial(\''+m.id+'\')">'+
+          '<input type="checkbox" '+(isSel?'checked':'')+' style="margin-top:2px;cursor:pointer" onclick="event.stopPropagation();INTELCENTER._toggleMaterial(\''+m.id+'\')">'+
+          '<div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:600;color:var(--text2)">'+m.title.substring(0,60)+'</div>'+
+          '<div style="font-size:9px;color:var(--text3)">'+(m.country||'')+(m.date?' | '+m.date:'')+(m.severity?' | <span style="color:'+sevClr+';font-weight:600">'+m.severity+'</span>':'')+'</div></div></div>';
+      });
+      html+='</div>';
+    });
+    html+='</div>';
+    html+='<div style="font-size:10px;color:var(--text3);margin-top:4px">\u5df2\u9009 <span id="aireport-sel-count" style="color:var(--cyan);font-weight:700">'+this._selectedMaterials.length+'</span> \u4e2a\u7d20\u6750</div>';
+    html+='</div>';
+    // 现状分析六要素
+    html+='<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--cyan);margin-bottom:6px">\u{1F50D} \u73b0\u72b6\u5206\u6790\uff08\u516d\u8981\u7d20\uff09</div>';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    var elements=[
+      {key:'time',lb:'\u65f6\u95f4',ph:'\u4e8b\u4ef6\u53d1\u751f\u65f6\u95f4',val:(r&&r.elements)?(r.elements.time||''):''},
+      {key:'place',lb:'地点',ph:'事件发生地点',val:(r&&r.elements)?(r.elements.place||''):''},
+      {key:'person',lb:'人物',ph:'涉及的组织/人员',val:(r&&r.elements)?(r.elements.person||''):''},
+      {key:'cause',lb:'起因',ph:'事件起因/背景',val:(r&&r.elements)?(r.elements.cause||''):''},
+      {key:'process',lb:'\u8fc7\u7a0b',ph:'\u4e8b\u4ef6\u53d1\u5c55\u8fc7\u7a0b',val:(r&&r.elements)?(r.elements.process||''):''},
+      {key:'result',lb:'\u7ed3\u679c',ph:'\u4e8b\u4ef6\u7ed3\u679c/\u5f71\u54cd',val:(r&&r.elements)?(r.elements.result||''):''}
+    ];
+    elements.forEach(function(e){
+      html+='<div><label class="text-xs text-muted" style="display:block;margin-bottom:2px">'+e.lb+'</label><input class="input" id="aireport-el-'+e.key+'" value="'+e.val.replace(/"/g,'&quot;')+'" placeholder="'+e.ph+'" style="font-size:11px;width:100%"></div>';
+    });
+    html+='</div>';
+    html+='<button class="btn sm" style="margin-top:6px;font-size:10px;padding:2px 10px" onclick="INTELCENTER._aiAutoFill()">\u{1F916} AI\u81ea\u52a8\u586b\u5145\u516d\u8981\u7d20</button>';
+    html+='</div>';
+    // 对华威胁
+    html+='<div style="margin-bottom:10px"><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u{1F6A6} \u5bf9\u534e\u5a01\u80c1\u5206\u6790</label><textarea class="input" id="aireport-threat" rows="3" placeholder="\u5206\u6790\u8be5\u4e8b\u4ef6\u5bf9\u4e2d\u56fd\u6d77\u5916\u5229\u76ca\u3001\u4e2d\u8d44\u4f01\u4e1a\u3001\u4e00\u5e26\u4e00\u8def\u9879\u76ee\u7684\u5a01\u80c1..." style="font-size:12px;width:100%;resize:vertical">'+(r?r.threatAnalysis||'':'')+'</textarea></div>';
+    // 对策建议
+    html+='<div style="margin-bottom:10px"><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u{1F4A1} \u5bf9\u7b56\u5efa\u8bae</label><textarea class="input" id="aireport-advice" rows="3" placeholder="\u63d0\u51fa\u5e94\u5bf9\u63aa\u65bd\u548c\u5efa\u8bae..." style="font-size:12px;width:100%;resize:vertical">'+(r?r.advice||'':'')+'</textarea></div>';
+    // 摘要
+    html+='<div style="margin-bottom:10px"><label class="text-xs text-muted" style="display:block;margin-bottom:4px">\u{1F4DD} \u62a5\u544a\u6458\u8981</label><textarea class="input" id="aireport-summary" rows="2" placeholder="\u7b80\u8981\u6982\u8ff0\u62a5\u544a\u5185\u5bb9..." style="font-size:12px;width:100%;resize:vertical">'+(r?r.summary||'':'')+'</textarea></div>';
+    html+='<div style="display:flex;gap:8px">'+
+      '<button class="btn primary sm" onclick="INTELCENTER.saveAiReport('+(r?'\''+r.id+'\'':'null')+')">\u2705 \u4fdd\u5b58\u62a5\u544a</button>'+
+      '<button class="btn sm" onclick="INTELCENTER._aiGenerate()">\u{1F916} AI\u4e00\u952e\u751f\u6210</button>'+
+      '<button class="btn sm" onclick="document.getElementById(\'modal\').classList.remove(\'show\')">\u53d6\u6d88</button></div>';
+    html+='</div>';
+    document.getElementById('modal-tt').textContent=(r?'\u7f16\u8f91AI\u60c5\u62a5\u5206\u6790\u62a5\u544a':'\u65b0\u5efaAI\u60c5\u62a5\u5206\u6790\u62a5\u544a');
+    document.getElementById('modal-bd').innerHTML=html;
+    document.getElementById('modal').classList.add('show');
+    // 存储完整素材列表供后续使用
+    this._allMaterials=materials;
+  },
+  _toggleMaterial(id){
+    var idx=this._selectedMaterials.findIndex(function(s){return s.id===id;});
+    if(idx>=0){this._selectedMaterials.splice(idx,1);}else{var m=this._allMaterials.find(function(x){return x.id===id;});if(m)this._selectedMaterials.push({id:m.id,source:m.source,title:m.title,country:m.country,date:m.date,severity:m.severity,desc:m.desc});}
+    var el=document.getElementById('aireport-sel-count');
+    if(el)el.textContent=this._selectedMaterials.length;
+    // 更新checkbox样式
+    this.showAiReportForm._refreshMaterials&&this.showAiReportForm._refreshMaterials();
+    // 简单刷新
+    var listEl=document.getElementById('aireport-materials-list');
+    if(listEl){
+      var checkboxes=listEl.querySelectorAll('input[type=checkbox]');
+      checkboxes.forEach(function(cb){
+        var div=cb.parentElement;
+        var mid=div.getAttribute('onclick');
+        if(mid){var idMatch=mid.match(/'([^']+)'/);if(idMatch){var mid2=idMatch[1];var isSel=INTELCENTER._selectedMaterials.some(function(s){return s.id===mid2;});cb.checked=isSel;div.style.background=isSel?'rgba(0,212,255,0.08)':'transparent';}}}
+      );
+    }
+  },
+  // AI自动填充六要素 (基于选中素材)
+  _aiAutoFill(){
+    if(this._selectedMaterials.length===0){showToast('\u8bf7\u5148\u9009\u62e9\u81f3\u5c111\u4e2a\u7d20\u6750');return;}
+    // 从素材中提取六要素
+    var times=[],places=[],persons=[],causes=[],processes=[],results=[];
+    this._selectedMaterials.forEach(function(m){
+      if(m.date)times.push(m.date);
+      if(m.country)places.push(m.country);
+      if(m.title)persons.push(m.title.split(/[\s,，、]/)[0]);
+      if(m.desc){
+        var d=m.desc.substring(0,200);
+        causes.push(d.substring(0,50));
+        processes.push(d);
+        results.push(d.substring(d.length-50));
+      }
+    });
+    var setVal=function(id,v){var el=document.getElementById(id);if(el&&v)el.value=v;};
+    setVal('aireport-el-time',times[0]||'');
+    setVal('aireport-el-place',[...new Set(places)].join('、'));
+    setVal('aireport-el-person',[...new Set(persons)].slice(0,5).join('、'));
+    setVal('aireport-el-cause',causes[0]||'');
+    setVal('aireport-el-process',processes.join('\n'));
+    setVal('aireport-el-result',results.join('；'));
+    showToast('\u{1F916} AI\u5df2\u6839\u636e\u9009\u4e2d\u7d20\u6750\u81ea\u52a8\u586b\u5145\u516d\u8981\u7d20');
+  },
+  // AI一键生成 (基于素材自动生成全部分析内容)
+  _aiGenerate(){
+    if(this._selectedMaterials.length===0){showToast('\u8bf7\u5148\u9009\u62e9\u81f3\u5c111\u4e2a\u7d20\u6750');return;}
+    this._aiAutoFill();
+    // 生成对华威胁分析
+    var threatParts=[];
+    var hasFusion=this._selectedMaterials.some(function(m){return m.source==='\u98ce\u9669\u878d\u5408';});
+    var hasThreat=this._selectedMaterials.some(function(m){return m.source==='\u5a01\u80c1\u7ec4\u7ec7';});
+    var hasAlert=this._selectedMaterials.some(function(m){return m.source==='\u9884\u8b66\u4e2d\u5fc3';});
+    var countries=[...new Set(this._selectedMaterials.map(function(m){return m.country;}).filter(Boolean))];
+    if(countries.length>0)threatParts.push('\u6d89\u4e8b\u56fd\u5bb6/\u533a\u57df\uff1a'+countries.join('\u3001')+'\u3002');
+    if(hasFusion)threatParts.push('\u6839\u636e\u98ce\u9669\u878d\u5408\u5f15\u64ce\u5206\u6790\uff0c\u8be5\u4e8b\u4ef6\u4e0e\u4e2d\u8d44\u4f01\u4e1a\u6d77\u5916\u9879\u76ee\u5b58\u5728\u9ad8\u5ea6\u5339\u914d\uff0c\u53ef\u80fd\u76f4\u63a5\u5a01\u80c1\u9879\u76ee\u4eba\u5458\u5b89\u5168\u548c\u8d44\u4ea7\u5b89\u5168\u3002');
+    if(hasThreat)threatParts.push('\u6d89\u53ca\u5a01\u80c1\u7ec4\u7ec7\u6d3b\u52a8\uff0c\u9700\u91cd\u70b9\u5173\u6ce8\u5176\u5bf9\u4e2d\u8d44\u4f01\u4e1a\u53ca\u4e00\u5e26\u4e00\u8def\u9879\u76ee\u7684\u6f5c\u5728\u88ad\u51fb\u610f\u56fe\u3002');
+    if(hasAlert)threatParts.push('\u7cfb\u7edf\u9884\u8b66\u4e2d\u5fc3\u5df2\u53d1\u51fa\u76f8\u5e94\u9884\u8b66\uff0c\u5efa\u8bae\u63d0\u5347\u5b89\u4fdd\u7b49\u7ea7\u3002');
+    threatParts.push('\u5efa\u8bae\u5bc6\u5207\u5173\u6ce8\u4e8b\u6001\u53d1\u5c55\uff0c\u53ca\u65f6\u8c03\u6574\u4e2d\u65b9\u4eba\u5458\u5b89\u4fdd\u7b56\u7565\uff0c\u786e\u4fdd\u4eba\u5458\u5b89\u5168\u4e3a\u9996\u8981\u539f\u5219\u3002');
+    var threatEl=document.getElementById('aireport-threat');
+    if(threatEl)threatEl.value=threatParts.join('\n');
+    // 生成对策建议
+    var adviceParts=[];
+    adviceParts.push('1. \u4eba\u5458\u5b89\u5168\uff1a\u7acb\u5373\u6838\u5b9e\u6d89\u4e8b\u533a\u57df\u4e2d\u65b9\u4eba\u5458\u5b89\u5168\u72b6\u51b5\uff0c\u542f\u52a8\u5e94\u6025\u64a4\u79bb\u9884\u6848\u3002');
+    adviceParts.push('2. \u9879\u76ee\u4fdd\u62a4\uff1a\u52a0\u5f3a\u9879\u76ee\u73b0\u573a\u5b89\u4fdd\u5de1\u903b\uff0c\u63d0\u5347\u5b89\u4fdd\u7b49\u7ea7\uff0c\u52a0\u5f3a\u4e0e\u5f53\u5730\u5b89\u4fdd\u529b\u91cf\u534f\u8c03\u3002');
+    adviceParts.push('3. \u4fe1\u606f\u76d1\u6d4b\uff1a\u5bc6\u5207\u8ddf\u8e2a\u4e8b\u6001\u53d1\u5c55\uff0c\u5145\u5206\u5229\u7528\u7cfb\u7edf\u91c7\u96c6\u5f15\u64ce\u83b7\u53d6\u6700\u65b0\u60c5\u62a5\u3002');
+    adviceParts.push('4. \u5916\u4ea4\u534f\u8c03\uff1a\u4e0e\u6d89\u4e8b\u56fd\u5bb6\u4e2d\u56fd\u4f7f\u9886\u9986\u4fdd\u6301\u6c9f\u901a\uff0c\u5c3d\u5feb\u786e\u8ba4\u4e2d\u65b9\u4eba\u5458\u5b89\u5168\u3002');
+    adviceParts.push('5. \u5e94\u6025\u9884\u6848\uff1a\u6839\u636e\u4e8b\u6001\u53d1\u5c55\u53ca\u65f6\u542f\u52a8\u76f8\u5e94\u5e94\u6025\u9884\u6848\uff0c\u786e\u4fdd\u54cd\u5e94\u8fc5\u901f\u6709\u6548\u3002');
+    var adviceEl=document.getElementById('aireport-advice');
+    if(adviceEl)adviceEl.value=adviceParts.join('\n');
+    // 生成摘要
+    var titleEl=document.getElementById('aireport-title');
+    var summaryEl=document.getElementById('aireport-summary');
+    if(summaryEl&&!summaryEl.value){
+      var countryStr=countries.length>0?countries.join('\u3001'):'\u6d89\u4e8b\u533a\u57df';
+      summaryEl.value='\u672c\u62a5\u544a\u57fa\u4e8e'+this._selectedMaterials.length+'\u4e2a\u60c5\u62a5\u7d20\u6750\uff0c\u5bf9'+countryStr+'\u7684\u5b89\u5168\u5f62\u52bf\u8fdb\u884c\u5206\u6790\u3002\u901a\u8fc7\u73b0\u72b6\u5206\u6790\u3001\u5bf9\u534e\u5a01\u80c1\u8bc4\u4f30\u548c\u5bf9\u7b56\u5efa\u8bae\uff0c\u4e3a\u6d77\u5916\u5229\u76ca\u4fdd\u62a4\u63d0\u4f9b\u51b3\u7b56\u652f\u6301\u3002';
+    }
+    if(titleEl&&!titleEl.value){
+      titleEl.value=countryStr+'\u5b89\u5168\u5f62\u52bf\u5206\u6790\u62a5\u544a';
+    }
+    showToast('\u{1F916} AI\u5df2\u81ea\u52a8\u751f\u6210\u5206\u6790\u62a5\u544a');
+  },
+  saveAiReport(id){
+    var title=document.getElementById('aireport-title').value.trim();
+    var country=document.getElementById('aireport-country').value.trim();
+    var level=document.getElementById('aireport-level').value;
+    var reportType=document.getElementById('aireport-type').value;
+    var threatAnalysis=document.getElementById('aireport-threat').value.trim();
+    var advice=document.getElementById('aireport-advice').value.trim();
+    var summary=document.getElementById('aireport-summary').value.trim();
+    var elements={};
+    ['time','place','person','cause','process','result'].forEach(function(k){
+      var el=document.getElementById('aireport-el-'+k);
+      if(el)elements[k]=el.value.trim();
+    });
+    if(!title){showToast('\u26a0\ufe0f \u8bf7\u586b\u5199\u62a5\u544a\u6807\u9898');return;}
+    var now=new Date().toLocaleString('zh-CN',{hour12:false}).replace(/\//g,'-').substring(0,16);
+    if(id){
+      var r=this._aiReports.find(function(x){return x.id===id;});
+      if(r){
+        r.title=title;r.country=country;r.threatLevel=level;r.reportType=reportType;
+        r.threatAnalysis=threatAnalysis;r.advice=advice;r.summary=summary;
+        r.elements=elements;r.materials=this._selectedMaterials.slice();r.updateTime=now;
+      }
+      showToast('\u2705 \u62a5\u544a\u5df2\u66f4\u65b0');
+    }else{
+      var nid='AIR-'+String(Date.now()).slice(-6);
+      this._aiReports.unshift({
+        id:nid,title:title,country:country,threatLevel:level,reportType:reportType,
+        threatAnalysis:threatAnalysis,advice:advice,summary:summary,elements:elements,
+        materials:this._selectedMaterials.slice(),createTime:now,author:AUTH.user?AUTH.user.name:''
+      });
+      showToast('\u2705 AI\u60c5\u62a5\u5206\u6790\u62a5\u544a\u5df2\u4fdd\u5b58');
+    }
+    this._aiReportSave();
+    document.getElementById('modal').classList.remove('show');
+    this.renderAiReport(document.getElementById('intel-content'));
+  },
+  showAiReportDetail(id){
+    var r=this._aiReports.find(function(x){return x.id===id;});
+    if(!r)return;
+    var lvClr=r.threatLevel==='critical'?'var(--red)':r.threatLevel==='high'?'var(--orange)':r.threatLevel==='medium'?'var(--yellow)':'var(--green)';
+    var lvLabel=r.threatLevel==='critical'?'\u{1F534} \u7d27\u6025':r.threatLevel==='high'?'\u{1F7E0} \u9ad8\u5371':r.threatLevel==='medium'?'\u{1F7E1} \u4e2d\u5371':'\u{1F7E2} \u4f4e\u5371';
+    var html='<div style="padding:12px;max-height:70vh;overflow-y:auto">';
+    html+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">';
+    html+='<span style="font-size:10px;font-weight:700;color:'+lvClr+';padding:2px 8px;background:'+lvClr+'15;border-radius:4px">'+lvLabel+'</span>';
+    html+='<span style="font-size:14px;font-weight:700">'+r.title+'</span>';
+    html+='</div>';
+    html+='<div style="display:flex;gap:12px;font-size:10px;color:var(--text3);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">'+
+      '<span>\u{1F4C5} '+(r.createTime||'')+'</span>'+
+      '<span>\u{1F464} '+(r.author||'')+'</span>'+
+      '<span>\u{1F3AF} '+(r.country||'')+'</span>'+
+      '<span>\u{1F4CB} '+(r.reportType||'')+'</span>'+
+      '</div>';
+    // 摘要
+    if(r.summary){html+='<div style="padding:10px;background:var(--bg2);border-radius:6px;margin-bottom:12px;font-size:12px;color:var(--text2)"><b style="color:var(--cyan)">\u{1F4DD} \u62a5\u544a\u6458\u8981</b><br>'+r.summary+'</div>';}
+    // 素材来源
+    if(r.materials&&r.materials.length>0){
+      html+='<div style="margin-bottom:12px"><b style="color:var(--orange);font-size:11px">\u{1F4CC} \u5206\u6790\u7d20\u6750 ('+r.materials.length+'\u4e2a)</b><div style="display:grid;gap:4px;margin-top:6px">';
+      r.materials.forEach(function(m){
+        html+='<div style="padding:6px 8px;background:var(--panel2);border-radius:4px;font-size:10px"><span style="color:var(--cyan);font-weight:600">['+m.source+']</span> '+m.title+(m.country?' | '+m.country:'')+(m.date?' | '+m.date:'')+'</div>';
+      });
+      html+='</div></div>';
+    }
+    // 现状分析六要素
+    if(r.elements){
+      html+='<div style="margin-bottom:12px"><b style="color:var(--cyan);font-size:11px">\u{1F50D} \u73b0\u72b6\u5206\u6790\uff08\u516d\u8981\u7d20\uff09</b><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">';
+      var elLabels={time:'\u65f6\u95f4',place:'\u5730\u70b9',person:'\u4eba\u7269',cause:'\u8d77\u56e0',process:'\u8fc7\u7a0b',result:'\u7ed3\u679c'};
+      Object.keys(elLabels).forEach(function(k){
+        if(r.elements[k]){
+          html+='<div style="padding:8px;background:var(--panel2);border-radius:6px"><div style="font-size:9px;color:var(--text3);margin-bottom:2px">'+elLabels[k]+'</div><div style="font-size:11px;color:var(--text2)">'+r.elements[k]+'</div></div>';
+        }
+      });
+      html+='</div></div>';
+    }
+    // 对华威胁
+    if(r.threatAnalysis){
+      html+='<div style="padding:10px;background:rgba(255,51,85,0.06);border:1px solid rgba(255,51,85,0.2);border-radius:6px;margin-bottom:12px"><b style="color:var(--red);font-size:11px">\u{1F6A6} \u5bf9\u534e\u5a01\u80c1\u5206\u6790</b><div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap">'+r.threatAnalysis+'</div></div>';
+    }
+    // 对策建议
+    if(r.advice){
+      html+='<div style="padding:10px;background:rgba(0,255,159,0.06);border:1px solid rgba(0,255,159,0.2);border-radius:6px;margin-bottom:12px"><b style="color:var(--green);font-size:11px">\u{1F4A1} \u5bf9\u7b56\u5efa\u8bae</b><div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap">'+r.advice+'</div></div>';
+    }
+    html+='<div style="display:flex;gap:8px">'+
+      '<button class="btn primary sm" onclick="INTELCENTER.showAiReportForm(\''+r.id+'\')">\u270f\ufe0f \u7f16\u8f91</button>'+
+      '<button class="btn sm" onclick="INTELCENTER.exportAiReport(\''+r.id+'\')">\u{1F4E5} \u5bfc\u51fa</button>'+
+      '<button class="btn sm" onclick="document.getElementById(\'modal\').classList.remove(\'show\')">\u5173\u95ed</button></div>';
+    html+='</div>';
+    document.getElementById('modal-tt').textContent='AI\u60c5\u62a5\u5206\u6790\u62a5\u544a ['+r.id+']';
+    document.getElementById('modal-bd').innerHTML=html;
+    document.getElementById('modal').classList.add('show');
+  },
+  deleteAiReport(id){
+    if(!PERM.canUpload()){showToast('\u26a0\ufe0f \u6743\u9650\u4e0d\u8db3');return;}
+    showConfirm('\u786e\u5b9a\u5220\u9664\u8be5\u60c5\u62a5\u5206\u6790\u62a5\u544a\uff1f',function(){
+      INTELCENTER._aiReports=INTELCENTER._aiReports.filter(function(r){return r.id!==id;});
+      INTELCENTER._aiReportSave();
+      INTELCENTER.renderAiReport(document.getElementById('intel-content'));
+      showToast('\u{1F5D1}\uFE0F \u5df2\u5220\u9664\u62a5\u544a');
+    });
+  },
+  exportAiReport(id){
+    var r=this._aiReports.find(function(x){return x.id===id;});
+    if(!r){showToast('\u62a5\u544a\u4e0d\u5b58\u5728');return;}
+    var txt='===== AI\u60c5\u62a5\u5206\u6790\u62a5\u544a =====\n\n';
+    txt+='\u62a5\u544a\u7f16\u53f7: '+r.id+'\n';
+    txt+='\u62a5\u544a\u6807\u9898: '+r.title+'\n';
+    txt+='\u521b\u5efa\u65f6\u95f4: '+r.createTime+'\n';
+    txt+='\u62a5\u544a\u4f5c\u8005: '+r.author+'\n';
+    txt+='\u5173\u6ce8\u56fd\u5bb6: '+(r.country||'')+'\n';
+    txt+='\u5a01\u80c1\u7b49\u7ea7: '+(r.threatLevel||'')+'\n';
+    txt+='\u62a5\u544a\u7c7b\u578b: '+(r.reportType||'')+'\n\n';
+    if(r.summary)txt+='--- \u62a5\u544a\u6458\u8981 ---\n'+r.summary+'\n\n';
+    if(r.materials&&r.materials.length>0){
+      txt+='--- \u5206\u6790\u7d20\u6750 ---\n';
+      r.materials.forEach(function(m){txt+='['+m.source+'] '+m.title+(m.country?' | '+m.country:'')+(m.date?' | '+m.date:'')+'\n';});
+      txt+='\n';
+    }
+    if(r.elements){
+      txt+='--- \u73b0\u72b6\u5206\u6790\uff08\u516d\u8981\u7d20\uff09---\n';
+      var elLabels={time:'\u65f6\u95f4',place:'\u5730\u70b9',person:'\u4eba\u7269',cause:'\u8d77\u56e0',process:'\u8fc7\u7a0b',result:'\u7ed3\u679c'};
+      Object.keys(elLabels).forEach(function(k){if(r.elements[k])txt+=elLabels[k]+': '+r.elements[k]+'\n';});
+      txt+='\n';
+    }
+    if(r.threatAnalysis)txt+='--- \u5bf9\u534e\u5a01\u80c1\u5206\u6790 ---\n'+r.threatAnalysis+'\n\n';
+    if(r.advice)txt+='--- \u5bf9\u7b56\u5efa\u8bae ---\n'+r.advice+'\n\n';
+    txt+='===== \u62a5\u544a\u7ed3\u675f =====\n';
+    var blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='AI_\u60c5\u62a5\u5206\u6790\u62a5\u544a_'+r.id+'.txt';
+    a.click();
+    showToast('\u{1F4E5} \u5df2\u5bfc\u51fa\u62a5\u544a');
   },
   renderTimeline(el){
     var html=this._trainLabel();
@@ -4897,6 +5364,72 @@ const SITUATION={
       options:{responsive:true,maintainAspectRatio:false,
         plugins:{legend:{display:false}},
         scales:{r:{min:0,max:10,grid:{color:'rgba(0,212,255,0.08)'},angleLines:{color:'rgba(0,212,255,0.08)'},pointLabels:{color:'#7a8ba3',font:{size:9}},ticks:{display:false}}}}});
+    // 渲染行业风险详情面板
+    this._renderIndustryDetail(labels,data);
+  },
+  _industryExpanded:false,
+  toggleIndustryDetail(){
+    this._industryExpanded=!this._industryExpanded;
+    var el=document.getElementById('sit-industry-detail');
+    if(el)el.style.display=this._industryExpanded?'block':'none';
+    if(this._industryExpanded)this._renderIndustryDetail();
+  },
+  _renderIndustryDetail(forceLabels,forceData){
+    var el=document.getElementById('sit-industry-detail');
+    if(!el)return;
+    var m={};ENTERPRISES.forEach(e=>{if(!m[e.industry])m[e.industry]=[];m[e.industry].push(getEntRisk(e));});
+    var labels=forceLabels||Object.keys(m),data=forceData||labels.map(i=>Math.round(m[i].reduce((a,b)=>a+b,0)/m[i].length*10)/10);
+    // 行业脆弱性矩阵 (12行业 x 11事件类型)
+    var sectors=Object.keys(m);
+    var eventTypes=['恐袭','涉华安全','军事冲突','政治事件','自然灾害','公共卫生','制裁','社会动荡','基础设施','地缘情报','开源情报'];
+    var eventKeys=['terror_events','security_events','military_conflicts','political_events','natural_disasters','public_health','sanctions_data','social_unrest','infrastructure','geopolitical_intel','osint_intel'];
+    var vulnData=typeof RISK_FUSION!=='undefined'?RISK_FUSION.SECTOR_VULNERABILITY:{};
+    var html='<div style="font-size:11px;font-weight:700;color:var(--cyan);margin-bottom:6px">🔥 行业脆弱性矩阵 (行业 × 事件类型)</div>';
+    html+='<div style="overflow-x:auto;max-height:200px;overflow-y:auto"><table style="width:100%;font-size:9px;border-collapse:collapse;white-space:nowrap">';
+    html+='<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1"><th style="padding:3px 4px;text-align:left;border-bottom:1px solid var(--border2)">行业</th>';
+    eventTypes.forEach(function(et){html+='<th style="padding:3px 4px;text-align:center;border-bottom:1px solid var(--border2);writing-mode:vertical-lr;text-orientation:upright;height:40px">'+et+'</th>';});
+    html+='<th style="padding:3px 4px;text-align:center;border-bottom:1px solid var(--border2)">综合</th></tr></thead><tbody>';
+    sectors.forEach(function(sec){
+      html+='<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 4px;font-weight:600;white-space:nowrap">'+sec+'</td>';
+      var rowSum=0,rowCount=0;
+      eventKeys.forEach(function(ek){
+        var vulnMap=vulnData[ek]||{};
+        var v=vulnMap[sec]||0;
+        rowSum+=v;rowCount++;
+        var bg=v>=0.8?'rgba(255,51,85,0.25)':v>=0.6?'rgba(255,136,0,0.2)':v>=0.4?'rgba(255,204,0,0.15)':v>0?'rgba(0,255,159,0.1)':'';
+        var clr=v>=0.8?'var(--red)':v>=0.6?'var(--orange)':v>=0.4?'var(--yellow)':'var(--text3)';
+        html+='<td style="padding:2px;text-align:center;background:'+bg+';color:'+clr+';font-weight:600">'+(v>0?v.toFixed(1):'-')+'</td>';
+      });
+      var avg=rowSum/rowCount;
+      var avgClr=avg>=0.7?'var(--red)':avg>=0.5?'var(--orange)':'var(--green)';
+      html+='<td style="padding:3px 4px;text-align:center;font-weight:700;color:'+avgClr+'">'+avg.toFixed(2)+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+    // 行业风险排名条形图
+    html+='<div style="margin-top:10px;font-size:11px;font-weight:700;color:var(--cyan);margin-bottom:6px">📊 行业风险排名</div>';
+    var ranked=labels.map(function(l,i){return{name:l,score:data[i],count:m[l].length};}).sort(function(a,b){return b.score-a.score;});
+    html+='<div style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto">';
+    ranked.forEach(function(r){
+      var pct=(r.score/10)*100;
+      var barClr=r.score>=7?'var(--red)':r.score>=5?'var(--orange)':'var(--green)';
+      html+='<div style="display:flex;align-items:center;gap:6px;font-size:10px">'+
+        '<span style="width:60px;flex-shrink:0;color:var(--text2);font-weight:600">'+r.name+'</span>'+
+        '<div style="flex:1;height:14px;background:var(--bg2);border-radius:3px;overflow:hidden;position:relative">'+
+        '<div style="width:'+pct+'%;height:100%;background:'+barClr+';border-radius:3px;transition:width .3s"></div>'+
+        '<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:9px;font-weight:700;color:var(--text1)">'+r.score.toFixed(1)+'</span>'+
+        '</div>'+
+        '<span style="width:40px;flex-shrink:0;color:var(--text3);font-size:9px">'+r.count+'项目</span>'+
+        '</div>';
+    });
+    html+='</div>';
+    // 行业建议
+    var topRisk=ranked[0];
+    if(topRisk){
+      html+='<div style="margin-top:8px;padding:8px 10px;background:rgba(255,51,85,0.06);border:1px solid rgba(255,51,85,0.2);border-radius:6px;font-size:10px;color:var(--text2)">'+
+        '<span style="color:var(--red);font-weight:700">⚠️ 最高风险行业: '+topRisk.name+'</span> (风险分:'+topRisk.score.toFixed(1)+', 涉及'+topRisk.count+'个项目)。'+
+        '建议重点关注该行业在海外的安全防护投入，加强应急预演和安保协调。</div>';
+    }
+    el.innerHTML=html;
   },
   renderAlertType(){
     var types={};ALERTS.forEach(function(a){types[a.type]=(types[a.type]||0)+1;});
@@ -8064,7 +8597,89 @@ var SETTINGS={
     // Role toggle for approved users
     html+='<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:8px;font-size:11px;color:var(--text3)">\u2139\ufe0f \u6388\u6743\u540e\u7528\u6237\u53ef\u767b\u5f55\u7cfb\u7edf\u3002\u7ba1\u7406\u5458\u53ef\u968f\u65f6\u505c\u7528\u3001\u542f\u7528\u3001\u5220\u9664\u7528\u6237\u3002\u5220\u9664\u540e\u7528\u6237\u9700\u91cd\u65b0\u6ce8\u518c\u3002</div>';
     html+='</div>';
+    // 试用账号管理
+    html+=this._renderTrialMgr();
     return html;
+  },
+  _renderTrialMgr(){
+    var users=this._getAllUsers();
+    var trialUsers=users.filter(function(u){return u.isTrial;});
+    var now=new Date().getTime();
+    var html='';
+    html+='<div class="card" style="max-width:700px;margin-top:16px">';
+    html+='<div class="card-tt"><span class="ic">\u{1F3DB}\uFE0F</span>\u8bd5\u7528\u8d26\u53f7\u7ba1\u7406 <span style="font-size:10px;color:var(--text3);font-weight:400">\u2014 \u4e3a\u5176\u4ed6\u4eba\u63d0\u4f9b\u6709\u9650\u671f\u8bd5\u7528\u8d26\u53f7</span></div>';
+    // 创建试用账号表单
+    html+='<div style="padding:12px;background:var(--bg2);border-radius:8px;margin-bottom:12px">';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--cyan);margin-bottom:8px">\u{1F274} \u521b\u5efa\u8bd5\u7528\u8d26\u53f7</div>';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">';
+    html+='<input class="input" id="trial-username" placeholder="\u7528\u6237\u540d" style="font-size:12px">';
+    html+='<input class="input" id="trial-password" type="password" placeholder="\u5bc6\u7801" style="font-size:12px">';
+    html+='<select class="select" id="trial-days" style="font-size:12px"><option value="3">3\u5929</option><option value="7" selected>7\u5929</option><option value="14">14\u5929</option><option value="30">30\u5929</option><option value="90">90\u5929</option></select>';
+    html+='<input class="input" id="trial-note" placeholder="\u5907\u6ce8(\u53ef\u9009)" style="font-size:12px">';
+    html+='</div>';
+    html+='<button class="btn primary sm" onclick="SETTINGS.createTrial()" style="font-size:11px">\u{1F274} \u521b\u5efa\u8bd5\u7528\u8d26\u53f7</button>';
+    html+='</div>';
+    // 试用账号列表
+    if(trialUsers.length===0){
+      html+='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">\u6682\u65e0\u8bd5\u7528\u8d26\u53f7</div>';
+    }else{
+      html+='<div style="font-size:11px;font-weight:700;color:var(--orange);margin-bottom:6px">\u8bd5\u7528\u8d26\u53f7\u5217\u8868 ('+trialUsers.length+')</div>';
+      html+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">';
+      html+='<thead><tr style="border-bottom:2px solid var(--border2)"><th style="text-align:left;padding:6px">\u7528\u6237\u540d</th><th style="text-align:left;padding:6px">\u521b\u5efa\u65f6\u95f4</th><th style="text-align:left;padding:6px">\u5230\u671f\u65f6\u95f4</th><th style="text-align:center;padding:6px">\u72b6\u6001</th><th style="text-align:center;padding:6px">\u64cd\u4f5c</th></tr></thead><tbody>';
+      trialUsers.forEach(function(u){
+        var expireTime=u.expireTime?new Date(u.expireTime).getTime():0;
+        var isExpired=now>expireTime;
+        var remainDays=Math.ceil((expireTime-now)/(24*60*60*1000));
+        var statusClr=isExpired?'var(--red)':remainDays<=3?'var(--orange)':'var(--green)';
+        var statusLb=isExpired?'\u{1F534} \u5df2\u8fc7\u671f':remainDays<=3?'\u{1F7E0} \u5269'+remainDays+'\u5929':'\u{1F7E2} \u5269'+remainDays+'\u5929';
+        if(u.status==='disabled')statusLb='\u23f8\ufe0f \u5df2\u505c\u7528';
+        html+='<tr style="border-bottom:1px solid var(--border)">';
+        html+='<td style="padding:6px;font-weight:700">'+u.user+(u.note?'<br><span style="font-size:9px;color:var(--text3)">'+u.note+'</span>':'')+'</td>';
+        html+='<td style="padding:6px;color:var(--text3);font-size:10px">'+(u.createTime||u.regTime||'-')+'</td>';
+        html+='<td style="padding:6px;color:'+statusClr+';font-size:10px;font-weight:600">'+(u.expireTime||'-')+'</td>';
+        html+='<td style="padding:6px;text-align:center"><span style="color:'+statusClr+';font-size:10px;font-weight:600">'+statusLb+'</span></td>';
+        html+='<td style="padding:6px;text-align:center;white-space:nowrap">';
+        html+='<button class="btn sm" style="font-size:9px;padding:2px 8px;background:var(--cyan);color:#000;margin-right:4px" onclick="SETTINGS.renewTrial(\''+u.user+'\')">\u{1F504} \u7eed\u671f</button>';
+        if(u.status!=='disabled'){
+          html+='<button class="btn sm" style="font-size:9px;padding:2px 8px;color:var(--orange);margin-right:4px" onclick="SETTINGS.disableUser(\''+u.user+'\')">\u23f8\ufe0f \u505c\u7528</button>';
+        }else{
+          html+='<button class="btn sm" style="font-size:9px;padding:2px 8px;background:var(--green);color:#000;margin-right:4px" onclick="SETTINGS.approveUser(\''+u.user+'\')">\u25b6\ufe0f \u542f\u7528</button>';
+        }
+        html+='<button class="btn sm" style="font-size:9px;padding:2px 8px;color:var(--red)" onclick="SETTINGS.deleteUser(\''+u.user+'\')">\u{1F5D1}\uFE0F</button>';
+        html+='</td></tr>';
+      });
+      html+='</tbody></table></div>';
+    }
+    // 试用账号权限说明
+    html+='<div style="margin-top:10px;padding:8px 10px;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.15);border-radius:6px;font-size:10px;color:var(--text2)">'+
+      '<b style="color:var(--cyan)">\u8bd5\u7528\u8d26\u53f7\u8bf4\u660e\uff1a</b>'+
+      '<br>\u2022 \u8bd5\u7528\u8d26\u53f7\u53ef\u67e5\u770b\u7cfb\u7edf\u5168\u90e8\u529f\u80fd\uff0c\u5305\u62ecAI\u60c5\u62a5\u5206\u6790\u62a5\u544a\u3001\u5f71\u50cf\u4e0a\u4f20\u7b49'+
+      '<br>\u2022 \u8bd5\u7528\u8d26\u53f7\u4e0d\u53ef\u7ba1\u7406\u7528\u6237\u3001\u5ba1\u6838\u6570\u636e\u3001\u540c\u6b65\u6570\u636e\u7b49\u7ba1\u7406\u5458\u529f\u80fd'+
+      '<br>\u2022 \u5230\u671f\u540e\u81ea\u52a8\u5931\u6548\uff0c\u7ba1\u7406\u5458\u53ef\u968f\u65f6\u7eed\u671f'+
+      '<br>\u2022 \u53ef\u968f\u65f6\u505c\u7528\u6216\u5220\u9664\u8bd5\u7528\u8d26\u53f7</div>';
+    html+='</div>';
+    return html;
+  },
+  createTrial(){
+    var u=document.getElementById('trial-username').value.trim();
+    var p=document.getElementById('trial-password').value.trim();
+    var d=parseInt(document.getElementById('trial-days').value);
+    var n=document.getElementById('trial-note').value.trim();
+    if(!u||!p){showToast('\u8bf7\u586b\u5199\u7528\u6237\u540d\u548c\u5bc6\u7801');return;}
+    if(u==='admin'){showToast('\u7528\u6237\u540d\u88ab\u4fdd\u7559');return;}
+    if(p.length<4){showToast('\u5bc6\u7801\u81f3\u5c114\u4f4d');return;}
+    if(AUTH.createTrialAccount(u,p,d,n)){
+      document.getElementById('trial-username').value='';
+      document.getElementById('trial-password').value='';
+      document.getElementById('trial-note').value='';
+      this.init();updatePendingUsersBadge();
+    }
+  },
+  renewTrial(name){
+    showConfirm('\u4e3a\u8bd5\u7528\u8d26\u53f7 "'+name+'" \u7eed\u671f7\u5929\uff1f',function(){
+      AUTH.renewTrial(name,7);
+      SETTINGS.init();
+    });
   },
   approveUser(name){
     var stored=localStorage.getItem('orps_acct_'+name);

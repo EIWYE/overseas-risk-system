@@ -538,7 +538,7 @@ select.intel-input{cursor:pointer}
 <div class="card"><div class="card-tt"><span class="ic">🚨</span>最新预警</div><div id="sit-alerts"></div></div>
 </div>
 <div class="grid mt-12" style="grid-template-columns:1fr 1fr">
-<div class="card"><div class="card-tt"><span class="ic">🏭</span>行业风险雷达</div><div style="height:200px"><canvas id="chart-sit-industry"></canvas></div></div>
+<div class="card" id="card-sit-industry"><div class="card-tt"><span class="ic">🏭</span>行业风险雷达 <span style="font-size:10px;color:var(--text3);font-weight:400;margin-left:6px;cursor:pointer" onclick="SITUATION.toggleIndustryDetail()">📊 点击查看详情</span></div><div style="height:200px;cursor:pointer" onclick="SITUATION.toggleIndustryDetail()"><canvas id="chart-sit-industry"></canvas></div><div id="sit-industry-detail" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px"></div></div>
 <div class="card"><div class="card-tt"><span class="ic">📈</span>预警类型分布</div><div style="display:flex;gap:16px;min-height:240px"><div style="width:180px;flex-shrink:0;position:relative"><canvas id="chart-sit-alert-type"></canvas><div id="sit-doughnut-center" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none"><div style="font-size:22px;font-weight:800;color:var(--cyan);line-height:1">-</div><div style="font-size:10px;color:var(--text3)">预警总数</div></div></div><div id="sit-alert-type-list" style="flex:1;min-width:0;overflow-y:auto;max-height:260px;font-size:11px;color:var(--text2)"></div></div></div>
 </div>
 </div>
@@ -549,6 +549,7 @@ select.intel-input{cursor:pointer}
 <div class="dc-tab active" onclick="INTELCENTER.switch('gallery')">🖼️ 影像图库</div>
 <div class="dc-tab" onclick="INTELCENTER.switch('osint')">📡 开源情报监测</div>
 <div class="dc-tab" onclick="INTELCENTER.switch('analysis')">🔍 影像分析</div>
+<div class="dc-tab" onclick="INTELCENTER.switch('aireport')">🤖 AI情报分析报告</div>
 <div class="dc-tab" onclick="INTELCENTER.switch('timeline')">📅 时序对比</div>
 <div class="dc-tab" onclick="INTELCENTER.switch('geoint')">🗺️ 地理空间情报</div>
 </div>
@@ -724,7 +725,7 @@ select.intel-input{cursor:pointer}
 <!-- TOAST -->
 <div id="toast"></div>
 
-<script src="scraper.js?v=36"></script>
-<script src="app.js?v=36"></script>
+<script src="scraper.js?v=37"></script>
+<script src="app.js?v=37"></script>
 </body>
 </html>

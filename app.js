@@ -1433,46 +1433,161 @@ var DATACENTER={
   },
 
   // ===== 风险融合引擎面板 =====
+  _fusionFilter:{country:'',level:'',sector:''},
   renderFusionPanel(){
     var el=document.getElementById('dc-fusion-panel');
     if(!el||typeof RISK_FUSION==='undefined')return;
     var summary=RISK_FUSION.getSummary();
-    var matches=RISK_FUSION.getResults();
+    var allMatches=RISK_FUSION.getResults();
     var lastTime=summary.lastFusionTime?
       new Date(summary.lastFusionTime).toLocaleString('zh-CN'):'从未执行';
+    var simCount=allMatches.filter(function(m){return m.is_simulated;}).length;
 
     var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
     var levelLabels={critical:'🔴 紧急',high:'🟠 高危',medium:'🟡 中危',low:'🟢 低危'};
+    var levelShort={critical:'紧急',high:'高危',medium:'中危',low:'低危'};
+
+    // 应用筛选
+    var f=this._fusionFilter;
+    var matches=allMatches.filter(function(m){
+      if(f.country&&m.project_country.indexOf(f.country)<0&&f.country.indexOf(m.project_country)<0)return false;
+      if(f.level&&m.alert_level!==f.level)return false;
+      if(f.sector&&m.project_sector!==f.sector)return false;
+      return true;
+    });
+
+    // 提取筛选选项
+    var countries={};
+    var sectors={};
+    allMatches.forEach(function(m){
+      countries[m.project_country]=(countries[m.project_country]||0)+1;
+      if(m.project_sector)sectors[m.project_sector]=(sectors[m.project_sector]||0)+1;
+    });
+    var countryList=Object.keys(countries).sort(function(a,b){return countries[b]-countries[a];});
+    var sectorList=Object.keys(sectors).sort();
+
+    // 按国家统计风险
+    var countryRisk={};
+    allMatches.forEach(function(m){
+      var c=m.project_country;
+      if(!countryRisk[c])countryRisk[c]={total:0,critical:0,high:0,medium:0,low:0,projects:{},topScore:0};
+      countryRisk[c].total++;
+      countryRisk[c][m.alert_level]++;
+      countryRisk[c].topScore=Math.max(countryRisk[c].topScore,m.match_score);
+      countryRisk[c].projects[m.project_id]=true;
+    });
+    var countryRiskList=Object.keys(countryRisk).sort(function(a,b){return countryRisk[b].topScore-countryRisk[a].topScore;});
+
+    // 按项目统计
+    var projectRisk={};
+    allMatches.forEach(function(m){
+      var pid=m.project_id;
+      if(!projectRisk[pid])projectRisk[pid]={name:m.project_name,country:m.project_country,enterprise:m.project_enterprise,sector:m.project_sector,total:0,critical:0,high:0,medium:0,low:0,topScore:0,matches:[]};
+      projectRisk[pid].total++;
+      projectRisk[pid][m.alert_level]++;
+      projectRisk[pid].topScore=Math.max(projectRisk[pid].topScore,m.match_score);
+      projectRisk[pid].matches.push(m);
+    });
+    var projectRiskList=Object.values(projectRisk).sort(function(a,b){return b.topScore-a.topScore;});
 
     var html='<div style="padding:16px">'+
-      // 融合引擎状态栏
-      '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px;background:rgba(255,61,127,0.06);border-radius:8px;margin-bottom:14px">'+
+
+      // === 融合引擎状态栏 ===
+      '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;background:rgba(255,61,127,0.06);border-radius:8px;margin-bottom:14px">'+
         '<div style="display:flex;align-items:center;gap:6px">'+
-          '<span style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block"></span>'+
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block;animation:pulse 2s infinite"></span>'+
           '<span style="font-size:12px;font-weight:600">融合引擎 v1.0</span>'+
         '</div>'+
         '<span style="font-size:11px;color:var(--text3)">上次融合: <b style="color:var(--text1)">'+lastTime+'</b></span>'+
-        '<span style="font-size:11px;color:var(--text3)">匹配总数: <b style="color:var(--cyan)">'+summary.totalMatches+'</b></span>'+
+        '<span style="font-size:11px;color:var(--text3)">匹配: <b style="color:var(--cyan)">'+summary.totalMatches+'</b></span>'+
         '<span style="font-size:11px;color:var(--text3)">受影响项目: <b style="color:var(--orange)">'+summary.affectedProjects+'</b></span>'+
         '<span style="font-size:11px;color:var(--text3)">关联事件: <b style="color:var(--cyan)">'+summary.totalEvents+'</b></span>'+
-        '<button class="btn primary sm" onclick="DATACENTER.runFusion()" style="margin-left:auto">⚡ 执行风险融合</button>'+
+        (simCount>0?'<span style="font-size:10px;padding:2px 8px;background:rgba(255,170,0,0.15);border-radius:4px;color:var(--orange);font-weight:600">⚠️ 含'+simCount+'条模拟数据</span>':'')+
+        '<div style="margin-left:auto;display:flex;gap:6px">'+
+          '<button class="btn sm" style="font-size:10px;padding:3px 10px" onclick="DATACENTER.loadSimFusion()">📥 加载模拟数据</button>'+
+          '<button class="btn sm" style="font-size:10px;padding:3px 10px" onclick="DATACENTER.clearSimFusion()">🗑️ 清除模拟</button>'+
+          '<button class="btn primary sm" onclick="DATACENTER.runFusion()">⚡ 执行融合</button>'+
+        '</div>'+
       '</div>'+
 
-      // 预警等级分布
+      // === 预警等级分布卡片 ===
       '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">'+
         ['critical','high','medium','low'].map(function(level){
           var count=summary.byLevel?summary.byLevel[level]||0:0;
-          return '<div style="padding:8px 16px;background:'+levelColors[level]+'15;border-radius:8px;border:1px solid '+levelColors[level]+'30">'+
-            '<div style="font-size:18px;font-weight:700;color:'+levelColors[level]+'">'+count+'</div>'+
+          var pct=allMatches.length?Math.round(count/allMatches.length*100):0;
+          return '<div style="flex:1;min-width:120px;padding:10px 14px;background:'+levelColors[level]+'12;border-radius:8px;border:1px solid '+levelColors[level]+'30;cursor:pointer" onclick="DATACENTER._setFusionFilter(\'level\',\''+level+'\')">'+
+            '<div style="font-size:22px;font-weight:700;color:'+levelColors[level]+'">'+count+'</div>'+
             '<div style="font-size:10px;color:var(--text3)">'+levelLabels[level]+'</div>'+
+            '<div style="height:3px;background:'+levelColors[level]+'20;border-radius:2px;margin-top:6px"><div style="height:100%;width:'+pct+'%;background:'+levelColors[level]+';border-radius:2px"></div></div>'+
+            '<div style="font-size:9px;color:var(--text3);margin-top:2px">'+pct+'% 占比</div>'+
           '</div>';
         }).join('')+
       '</div>'+
 
-      // 融合结果表格
+      // === 双栏: 左=国家风险概况  右=高危项目Top ===
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
+        // 国家风险概况
+        '<div style="background:var(--bg2);border-radius:8px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:8px">🌍 国家风险概况 (按最高匹配分排序)</div>'+
+          '<div style="max-height:220px;overflow-y:auto">'+
+            countryRiskList.slice(0,12).map(function(c){
+              var cr=countryRisk[c];
+              var riskColor=cr.critical>0?'var(--red)':cr.high>0?'var(--orange)':cr.medium>0?'var(--yellow)':'var(--green)';
+              var riskLabel=cr.critical>0?'🔴':cr.high>0?'🟠':cr.medium>0?'🟡':'🟢';
+              return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="DATACENTER._setFusionFilter(\'country\',\''+c+'\')" onmouseover="this.style.background=\'rgba(255,255,255,0.03)\'" onmouseout="this.style.background=\'\'">'+
+                '<span style="font-size:14px">'+riskLabel+'</span>'+
+                '<span style="flex:1;font-size:11px;font-weight:500">'+c+'</span>'+
+                '<span style="font-size:10px;color:var(--text3)">'+Object.keys(cr.projects).length+'项目</span>'+
+                '<span style="font-size:10px;font-weight:700;color:'+riskColor+'">'+cr.topScore+'分</span>'+
+                '<span style="font-size:9px;color:var(--text3);min-width:50px;text-align:right">'+cr.total+'条预警</span>'+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+        // 高危项目Top
+        '<div style="background:var(--bg2);border-radius:8px;padding:12px">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:8px">🏭 高危项目Top (按最高风险分排序)</div>'+
+          '<div style="max-height:220px;overflow-y:auto">'+
+            projectRiskList.slice(0,12).map(function(p,i){
+              var riskColor=p.critical>0?'var(--red)':p.high>0?'var(--orange)':'var(--yellow)';
+              return '<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="DATACENTER._showFusionProjectDetail('+p.matches[0].project_id+')" onmouseover="this.style.background=\'rgba(255,255,255,0.03)\'" onmouseout="this.style.background=\'\'">'+
+                '<span style="font-size:10px;color:var(--text3);min-width:16px">'+(i+1)+'.</span>'+
+                '<div style="flex:1">'+
+                  '<div style="font-size:11px;font-weight:500">'+p.name.substring(0,28)+'</div>'+
+                  '<div style="font-size:9px;color:var(--text3)">'+p.country+' | '+p.sector+' | '+p.enterprise.substring(0,15)+'</div>'+
+                '</div>'+
+                '<div style="text-align:right">'+
+                  '<div style="font-size:11px;font-weight:700;color:'+riskColor+'">'+p.topScore+'</div>'+
+                  '<div style="font-size:9px;color:var(--text3)">'+p.total+'条</div>'+
+                '</div>'+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+
+      // === 筛选栏 ===
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:var(--bg2);border-radius:6px">'+
+        '<span style="font-size:11px;font-weight:600;color:var(--text3)">🔍 筛选:</span>'+
+        '<select class="select" style="font-size:10px;padding:2px 8px;min-width:100px" onchange="DATACENTER._setFusionFilter(\'country\',this.value)">'+
+          '<option value="">全部国家</option>'+
+          countryList.map(function(c){return '<option value="'+c+'" '+(f.country===c?'selected':'')+'>'+c+' ('+countries[c]+')</option>';}).join('')+
+        '</select>'+
+        '<select class="select" style="font-size:10px;padding:2px 8px;min-width:90px" onchange="DATACENTER._setFusionFilter(\'level\',this.value)">'+
+          '<option value="">全部等级</option>'+
+          ['critical','high','medium','low'].map(function(l){return '<option value="'+l+'" '+(f.level===l?'selected':'')+'>'+levelShort[l]+'</option>';}).join('')+
+        '</select>'+
+        '<select class="select" style="font-size:10px;padding:2px 8px;min-width:90px" onchange="DATACENTER._setFusionFilter(\'sector\',this.value)">'+
+          '<option value="">全部行业</option>'+
+          sectorList.map(function(s){return '<option value="'+s+'" '+(f.sector===s?'selected':'')+'>'+s+'</option>';}).join('')+
+        '</select>'+
+        (f.country||f.level||f.sector?'<button class="btn sm" style="font-size:10px;padding:2px 8px" onclick="DATACENTER._clearFusionFilter()">✕ 清除筛选</button>':'')+
+        '<span style="font-size:10px;color:var(--text3);margin-left:auto">显示 '+matches.length+' / '+allMatches.length+' 条</span>'+
+      '</div>'+
+
+      // === 融合结果表格(可点击) ===
       (matches.length>0?
-        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:600">🔗 事件-项目匹配结果 (按风险分数排序)</div>'+
-        '<div class="table-wrap" style="max-height:350px;overflow-y:auto">'+
+        '<div class="table-wrap" style="max-height:400px;overflow-y:auto">'+
           '<table style="width:100%;font-size:11px">'+
             '<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">'+
               '<th style="text-align:left;padding:6px 8px">预警等级</th>'+
@@ -1481,18 +1596,27 @@ var DATACENTER={
               '<th style="text-align:left;padding:6px 8px">国家</th>'+
               '<th style="text-align:left;padding:6px 8px">行业</th>'+
               '<th style="text-align:left;padding:6px 8px">匹配分</th>'+
+              '<th style="text-align:left;padding:6px 8px">操作</th>'+
             '</tr></thead><tbody>'+
-            matches.slice(0,50).map(function(m){
+            matches.slice(0,100).map(function(m){
               var lc=levelColors[m.alert_level]||'var(--text3)';
-              return '<tr style="border-bottom:1px solid var(--border)">'+
-                '<td style="padding:6px 8px"><span style="color:'+lc+';font-size:10px;font-weight:600">'+(levelLabels[m.alert_level]||'')+'</span></td>'+
+              var idx=allMatches.indexOf(m);
+              return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="DATACENTER.showFusionDetail('+idx+')" onmouseover="this.style.background=\'rgba(255,255,255,0.03)\'" onmouseout="this.style.background=\'\'">'+
+                '<td style="padding:6px 8px"><span style="color:'+lc+';font-size:10px;font-weight:600">'+(levelLabels[m.alert_level]||'')+'</span>'+
+                  (m.is_simulated?'<span style="font-size:8px;color:var(--orange);margin-left:2px">模拟</span>':'')+'</td>'+
                 '<td style="padding:6px 8px;max-width:200px"><div style="font-weight:500">'+m.event_title.substring(0,50)+'</div>'+
                   '<div style="font-size:9px;color:var(--text3)">'+m.event_date+' | '+m.event_type+'</div></td>'+
                 '<td style="padding:6px 8px;max-width:200px"><div style="font-weight:500">'+m.project_name+'</div>'+
                   '<div style="font-size:9px;color:var(--text3)">'+m.project_enterprise+'</div></td>'+
                 '<td style="padding:6px 8px">'+m.project_country+'</td>'+
                 '<td style="padding:6px 8px"><span style="font-size:10px;padding:1px 6px;background:var(--bg2);border-radius:3px">'+m.project_sector+'</span></td>'+
-                '<td style="padding:6px 8px"><span style="color:'+lc+';font-weight:700">'+m.match_score+'</span></td>'+
+                '<td style="padding:6px 8px">'+
+                  '<div style="display:flex;align-items:center;gap:4px">'+
+                    '<div style="width:40px;height:5px;background:var(--bg2);border-radius:3px"><div style="height:100%;width:'+m.match_score+'%;background:'+lc+';border-radius:3px"></div></div>'+
+                    '<span style="color:'+lc+';font-weight:700;font-size:12px">'+m.match_score+'</span>'+
+                  '</div>'+
+                '</td>'+
+                '<td style="padding:6px 8px"><button class="btn sm" style="font-size:9px;padding:1px 6px" onclick="event.stopPropagation();DATACENTER.showFusionDetail('+idx+')">详情</button></td>'+
               '</tr>';
             }).join('')+
           '</tbody></table>'+
@@ -1501,12 +1625,164 @@ var DATACENTER={
         '<div style="text-align:center;padding:30px;color:var(--text3)">'+
           '<div style="font-size:36px;margin-bottom:8px">🔗</div>'+
           '<div style="font-size:13px;margin-bottom:4px">暂无融合结果</div>'+
-          '<div style="font-size:11px">请先采集数据 → 审核 → 转入主数据库 → 点击「执行风险融合」</div>'+
+          '<div style="font-size:11px;margin-bottom:10px">点击「加载模拟数据」快速体验，或采集数据→审核→执行融合</div>'+
+          '<button class="btn primary sm" onclick="DATACENTER.loadSimFusion()">📥 加载模拟融合数据</button>'+
         '</div>'
       )+
     '</div>';
 
     el.innerHTML=html;
+  },
+
+  _setFusionFilter(key,val){
+    this._fusionFilter[key]=val;
+    this.renderFusionPanel();
+  },
+  _clearFusionFilter(){
+    this._fusionFilter={country:'',level:'',sector:''};
+    this.renderFusionPanel();
+  },
+
+  // 融合结果详情弹窗
+  showFusionDetail(idx){
+    var matches=RISK_FUSION.getResults();
+    var m=matches[idx];
+    if(!m)return;
+    var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+    var levelLabels={critical:'🔴 紧急',high:'🟠 高危',medium:'🟡 中危',low:'🟢 低危'};
+    var lc=levelColors[m.alert_level]||'var(--text3)';
+    var reasons=m.match_reasons?m.match_reasons.split('; '):[];
+    var vulnPct=Math.round((m.vulnerability||0)*100);
+
+    // 推荐措施
+    var actions=[];
+    if(m.alert_level==='critical'){
+      actions.push('立即启动应急预案，组织人员撤离至安全区域');
+      actions.push('向驻外使领馆和企业总部报告，请求安全支援');
+      actions.push('暂停项目运营，评估损失和恢复方案');
+    }else if(m.alert_level==='high'){
+      actions.push('提升安保等级，加强现场安全巡逻');
+      actions.push('限制非必要外出，建立安全联络机制');
+      actions.push('制定应急疏散预案，确保撤离路线畅通');
+    }else if(m.alert_level==='medium'){
+      actions.push('密切关注事态发展，保持信息畅通');
+      actions.push('提醒员工注意安全，减少不必要活动');
+      actions.push('审查和完善安保措施');
+    }else{
+      actions.push('持续监测风险动态');
+      actions.push('保持常规安保措施');
+    }
+
+    var html='<div style="padding:20px;max-width:600px">'+
+      // 预警头部
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:'+lc+'10;border-radius:8px;border-left:3px solid '+lc+'">'+
+        '<div>'+
+          '<div style="font-size:14px;font-weight:700;color:'+lc+'">'+(levelLabels[m.alert_level]||'')+(m.is_simulated?' ⚠️ 模拟数据':'')+'</div>'+
+          '<div style="font-size:18px;font-weight:700;margin-top:4px">'+m.event_title+'</div>'+
+        '</div>'+
+        '<div style="margin-left:auto;text-align:center">'+
+          '<div style="font-size:28px;font-weight:800;color:'+lc+'">'+m.match_score+'</div>'+
+          '<div style="font-size:10px;color:var(--text3)">风险匹配分</div>'+
+        '</div>'+
+      '</div>'+
+
+      // 事件信息
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
+        '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px"><div style="font-size:9px;color:var(--text3)">发生国家</div><div style="font-size:12px;font-weight:500">'+m.event_country+'</div></div>'+
+        '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px"><div style="font-size:9px;color:var(--text3)">发生日期</div><div style="font-size:12px;font-weight:500">'+m.event_date+'</div></div>'+
+        '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px"><div style="font-size:9px;color:var(--text3)">事件类型</div><div style="font-size:12px;font-weight:500">'+m.event_type+'</div></div>'+
+        '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px"><div style="font-size:9px;color:var(--text3)">事件严重度</div><div style="font-size:12px;font-weight:500">'+(m.event_severity||'medium')+'</div></div>'+
+      '</div>'+
+
+      // 受影响项目
+      '<div style="padding:10px 12px;background:rgba(0,212,255,0.06);border-radius:6px;margin-bottom:14px">'+
+        '<div style="font-size:10px;color:var(--text3);margin-bottom:4px">🏭 受影响中资项目</div>'+
+        '<div style="font-size:13px;font-weight:600">'+m.project_name+'</div>'+
+        '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+m.project_enterprise+' | '+m.project_country+' | '+m.project_sector+' | '+m.project_status+'</div>'+
+      '</div>'+
+
+      // 匹配原因
+      '<div style="margin-bottom:14px">'+
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px">🔗 匹配分析</div>'+
+        '<div style="padding:10px;background:var(--bg2);border-radius:6px">'+
+          reasons.map(function(r){
+            return '<div style="font-size:11px;padding:3px 0;display:flex;gap:6px"><span style="color:var(--cyan)">▸</span><span>'+r+'</span></div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+
+      // 行业脆弱性
+      '<div style="margin-bottom:14px">'+
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px">📊 行业脆弱性评估</div>'+
+        '<div style="padding:10px;background:var(--bg2);border-radius:6px">'+
+          '<div style="display:flex;align-items:center;gap:10px">'+
+            '<div style="flex:1;height:8px;background:var(--bg1);border-radius:4px;overflow:hidden">'+
+              '<div style="height:100%;width:'+vulnPct+'%;background:'+(vulnPct>=70?'var(--red)':vulnPct>=50?'var(--orange)':'var(--yellow)')+';border-radius:4px"></div>'+
+            '</div>'+
+            '<span style="font-size:12px;font-weight:700">'+vulnPct+'%</span>'+
+          '</div>'+
+          '<div style="font-size:10px;color:var(--text3);margin-top:4px">'+
+            (vulnPct>=70?'该行业对此类事件高度脆弱，需立即采取防护措施':
+             vulnPct>=50?'该行业对此类事件中度脆弱，应加强防范':
+             '该行业对此类事件脆弱性较低，保持常规监测')+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+
+      // 推荐措施
+      '<div style="margin-bottom:14px">'+
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px">🎯 推荐处置措施</div>'+
+        '<div style="padding:10px;background:rgba(0,200,83,0.06);border-radius:6px">'+
+          actions.map(function(a,i){
+            return '<div style="font-size:11px;padding:4px 0;display:flex;gap:8px"><span style="color:var(--green);font-weight:700">'+(i+1)+'.</span><span>'+a+'</span></div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+
+      // 融合时间
+      '<div style="font-size:10px;color:var(--text3);text-align:right">融合时间: '+(m.fused_at?new Date(m.fused_at).toLocaleString('zh-CN'):'-')+'</div>'+
+    '</div>';
+    showModal('融合预警详情',html);
+  },
+
+  // 项目级预警详情
+  _showFusionProjectDetail(pid){
+    var alerts=RISK_FUSION.getProjectAlerts(pid);
+    if(!alerts.length)return;
+    var p=alerts[0];
+    var levelColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+    var levelLabels={critical:'🔴 紧急',high:'🟠 高危',medium:'🟡 中危',low:'🟢 低危'};
+    var counts={critical:0,high:0,medium:0,low:0};
+    alerts.forEach(function(a){counts[a.alert_level]++;});
+
+    var html='<div style="padding:20px;max-width:600px">'+
+      '<div style="margin-bottom:14px">'+
+        '<div style="font-size:16px;font-weight:700">'+p.project_name+'</div>'+
+        '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+p.project_enterprise+' | '+p.project_country+' | '+p.project_sector+' | '+p.project_status+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:14px">'+
+        ['critical','high','medium','low'].map(function(l){
+          return '<div style="padding:6px 12px;background:'+levelColors[l]+'15;border-radius:6px;text-align:center">'+
+            '<div style="font-size:16px;font-weight:700;color:'+levelColors[l]+'">'+counts[l]+'</div>'+
+            '<div style="font-size:9px;color:var(--text3)">'+levelLabels[l]+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+      '<div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px">该项目关联的所有风险预警 ('+alerts.length+'条)</div>'+
+      '<div style="max-height:300px;overflow-y:auto">'+
+        alerts.sort(function(a,b){return b.match_score-a.match_score;}).map(function(a,i){
+          var lc=levelColors[a.alert_level]||'var(--text3)';
+          return '<div style="padding:8px;background:var(--bg2);border-radius:6px;margin-bottom:4px;cursor:pointer;border-left:3px solid '+lc+'" onclick="DATACENTER.showFusionDetail('+RISK_FUSION.getResults().indexOf(a)+')">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center">'+
+              '<span style="font-size:11px;font-weight:500">'+a.event_title.substring(0,40)+'</span>'+
+              '<span style="font-size:11px;font-weight:700;color:'+lc+'">'+a.match_score+'</span>'+
+            '</div>'+
+            '<div style="font-size:9px;color:var(--text3);margin-top:2px">'+a.event_date+' | '+a.event_type+'</div>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+    '</div>';
+    showModal('项目风险预警 - '+p.project_name,html);
   },
 
   runFusion(){
@@ -1516,6 +1792,23 @@ var DATACENTER={
     showToast('⚡ 风险融合完成: '+result.total+'条匹配，涉及'+RISK_FUSION.getSummary().affectedProjects+'个项目');
   },
 
+  loadSimFusion(){
+    if(typeof RISK_FUSION==='undefined')return;
+    var n=RISK_FUSION.seedSimulatedFusion();
+    if(n>0){
+      this.renderFusionPanel();
+      showToast('✅ 已加载 '+n+' 条模拟融合数据');
+    }else{
+      showToast('模拟数据已存在，如需重新加载请先清除');
+    }
+  },
+  clearSimFusion(){
+    if(typeof RISK_FUSION==='undefined')return;
+    RISK_FUSION.clearSimulatedFusion();
+    this.renderFusionPanel();
+    showToast('🗑️ 已清除模拟融合数据');
+  },
+
   // ===== 采集库面板 (独立数据库展示) =====
   _collectedTab:'terror_events',
   renderCollectedPanel(){
@@ -1523,6 +1816,18 @@ var DATACENTER={
     if(!el)return;
     var me=this;
     var stats=COLLECTED_DB.getStats();
+    var simCount=typeof COLLECTED_DB.countSimulated==='function'?COLLECTED_DB.countSimulated():0;
+    var totalCollected=stats.total||0;
+
+    // 顶部统计+操作栏
+    var topBar='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;background:var(--bg2);border-radius:6px;margin-bottom:8px">'+
+      '<span style="font-size:11px;font-weight:600;color:var(--text3)">📊 采集库总量: <b style="color:var(--cyan)">'+totalCollected+'</b> 条</span>'+
+      (simCount>0?'<span style="font-size:10px;padding:2px 8px;background:rgba(255,170,0,0.15);border-radius:4px;color:var(--orange);font-weight:600">⚠️ 含 '+simCount+' 条模拟数据</span>':'')+
+      '<div style="margin-left:auto;display:flex;gap:6px">'+
+        (typeof COLLECTED_DB.seedSimulatedData==='function'?'<button class="btn sm" style="font-size:10px;padding:3px 8px" onclick="DATACENTER.loadSimCollected()">📥 加载模拟数据</button>':'')+
+        (simCount>0?'<button class="btn sm" style="font-size:10px;padding:3px 8px" onclick="DATACENTER.clearSimCollected()">🗑️ 清除模拟</button>':'')+
+      '</div>'+
+    '</div>';
 
     // Tab 栏
     var tabsHtml='<div class="dc-tabs" style="margin:0 0 10px 0">'+
@@ -1562,15 +1867,18 @@ var DATACENTER={
       tableHtml='<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">'+
         '<div style="font-size:32px;margin-bottom:8px">📭</div>'+
         '采集库中暂无'+(this.tabs.find(function(t){return t.key===cat;})||{label:cat}).label+'数据<br>'+
-        '<span style="font-size:11px">点击上方"一键采集全网数据"从全网获取实时数据</span>'+
+        '<span style="font-size:11px;margin-bottom:10px;display:block">点击「加载模拟数据」快速体验，或采集全网实时数据</span><br>'+
+        '<button class="btn primary sm" onclick="DATACENTER.loadSimCollected()">📥 加载模拟数据</button>'+
       '</div>';
     }else{
       // 限制显示前30条
       var displayData=data.slice(0,30);
+      var sevColors={critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--green)'};
+      var sevLabels={critical:'🔴',high:'🟠',medium:'🟡',low:'🟢'};
       tableHtml='<div class="table-wrap" style="max-height:350px;overflow-y:auto"><table style="font-size:11px">'+
         '<thead><tr>'+
         (isAdmin?'<th>操作</th>':'')+
-        '<th>审核</th><th>标题/描述</th><th>日期</th><th>国家</th><th>来源</th><th>区域</th>'+
+        '<th>审核</th><th>标题/描述</th><th>日期</th><th>国家</th><th>严重度</th><th>质量分</th><th>来源</th><th>区域</th>'+
         '</tr></thead><tbody>'+
         displayData.map(function(item){
           var auditLabel=me.AUDIT_LABELS[item.audit_status||'pending']||'🟡 待审核';
@@ -1590,17 +1898,24 @@ var DATACENTER={
               actionHtml='<td style="color:var(--text3);font-size:10px">已驳回</td>';
             }
           }
-          var desc=(item.title||item.desc||'').substring(0,60);
-          if((item.title||item.desc||'').length>60)desc+='...';
+          var desc=(item.title||item.desc||'').substring(0,50);
+          if((item.title||item.desc||'').length>50)desc+='...';
           var regionColor=(item.source_region==='国内')?'var(--red)':'var(--blue)';
+          var sev=item.severity||'medium';
+          var sevColor=sevColors[sev]||'var(--text3)';
+          var qs=item.quality_score||0;
+          var qsColor=qs>=80?'var(--green)':qs>=60?'var(--yellow)':qs>=35?'var(--orange)':'var(--red)';
           return '<tr style="border-bottom:1px solid var(--border)">'+
             actionHtml+
             '<td><span style="color:'+auditColor+';font-size:10px;font-weight:600">'+auditLabel+'</span></td>'+
-            '<td style="max-width:300px"><div style="font-weight:500">'+desc+'</div>'+
+            '<td style="max-width:250px"><div style="font-weight:500">'+desc+
+              (item.is_simulated?'<span style="font-size:8px;padding:1px 4px;background:rgba(255,170,0,0.15);border-radius:3px;color:var(--orange);margin-left:4px">模拟</span>':'')+'</div>'+
               (item.url?'<a href="'+item.url+'" target="_blank" style="font-size:9px;color:var(--cyan)">查看原文</a>':'')+
             '</td>'+
             '<td style="white-space:nowrap">'+(item.date||'')+'</td>'+
             '<td>'+(item.country||'未知')+'</td>'+
+            '<td><span style="color:'+sevColor+';font-size:14px" title="'+sev+'">'+(sevLabels[sev]||'⚪')+'</span></td>'+
+            '<td><span style="color:'+qsColor+';font-weight:600;font-size:10px">'+qs+'</span></td>'+
             '<td style="font-size:10px">'+(item.source||'')+'</td>'+
             '<td><span style="font-size:9px;color:'+regionColor+';font-weight:600">'+(item.source_region||'')+'</span></td>'+
           '</tr>';
@@ -1612,6 +1927,7 @@ var DATACENTER={
     }
 
     el.innerHTML='<div style="padding:12px">'+
+      topBar+
       tabsHtml+
       auditBarHtml+
       tableHtml+
@@ -1620,6 +1936,24 @@ var DATACENTER={
   switchCollectedTab(cat){
     this._collectedTab=cat;
     this.renderCollectedPanel();
+  },
+  loadSimCollected(){
+    if(typeof COLLECTED_DB==='undefined'||typeof COLLECTED_DB.seedSimulatedData!=='function')return;
+    var n=COLLECTED_DB.seedSimulatedData();
+    if(n>0){
+      this.renderCollectedPanel();
+      this.renderScraperPanel();
+      showToast('✅ 已加载 '+n+' 条模拟情报数据');
+    }else{
+      showToast('模拟数据已存在，如需重新加载请先清除');
+    }
+  },
+  clearSimCollected(){
+    if(typeof COLLECTED_DB==='undefined'||typeof COLLECTED_DB.clearSimulatedData!=='function')return;
+    COLLECTED_DB.clearSimulatedData();
+    this.renderCollectedPanel();
+    this.renderScraperPanel();
+    showToast('🗑️ 已清除模拟采集数据');
   },
   // 采集库审核操作
   collectedSetAudit(cat,id,status){
@@ -2047,6 +2381,11 @@ function getLevel(s){if(s>=8)return{level:'critical',label:'极高风险',color:
 function getEntRisk(ent){const cs=ent.countries.map(c=>COUNTRIES.find(x=>x.name===c)).filter(Boolean);if(!cs.length)return 0;return Math.round(cs.reduce((s,c)=>s+calcOverall(c.scores),0)/cs.length*10)/10}
 function getEntsInCountry(n){return ENTERPRISES.filter(e=>e.countries.includes(n))}
 function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000)}
+function showModal(title,html){
+  document.getElementById('modal-tt').textContent=title;
+  document.getElementById('modal-bd').innerHTML='<div style="max-width:650px">'+html+'</div>';
+  document.getElementById('modal').classList.add('show');
+}
 function showConfirm(msg,cb){
   document.getElementById('modal-tt').textContent='\u26a0\ufe0f \u786e\u8ba4\u64cd\u4f5c';
   document.getElementById('modal-bd').innerHTML='<div style="padding:8px 0;font-size:13px;line-height:1.7">'+msg+'</div><div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button class="btn sm" onclick="document.getElementById(\'modal\').classList.remove(\'show\')">\u53d6\u6d88</button><button class="btn danger sm" id="confirm-ok-btn">\u786e\u8ba4</button></div>';
